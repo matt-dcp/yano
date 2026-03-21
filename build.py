@@ -47,33 +47,19 @@ SB_TYPICAL_MARGIN = 75
 SB_TOP25_MARGIN = 85
 SB_AVG_OTA_COMMISSION = 15
 
-# Pro forma monthly projections — REVISED 2/22/26 based on 66 days of actuals
-# Key calibrations from actual data:
-#   - Jan ADR came in at $286 (vs $375 projected) — short winter stays, ramp-up pricing
-#   - Feb ADR $397 — right on target, occupancy ~79%
-#   - Mar already 62% booked at $392 ADR with 5 weeks lead time
-#   - Blended owner margin: 89.4% (better than projected 83%)
-#   - Cleaning: $105/turn actual (was $111 assumed)
-#   - Forward ADR on books: $392 Mar, $477 Apr, $378 May, $479 Jun
-# Methodology: Jan/Feb use actuals. Mar forward uses actual ADR where bookings exist,
-# seasonal shape from original model, occupancy dialed to 70-80% (was 70-85%).
-# OpEx = variable costs ONLY (cleaning, supplies, maint, marketing). Management fees
-# are deducted separately in the waterfall as 10% of gross — NOT included here.
-# Feb actual non-mgmt variable OpEx: ~$11K. Steady-state estimate: $7-11K/mo.
-PF_MONTHLY = [
-    {"month": "Jan", "adr": 286, "occ": 75, "gross": 40041, "netOwner": 35785, "opex": 11000, "noi": 24785, "bookings": 56},
-    {"month": "Feb", "adr": 397, "occ": 79, "gross": 52466, "netOwner": 47423, "opex": 8500, "noi": 38923, "bookings": 53},
-    {"month": "Mar", "adr": 392, "occ": 78, "gross": 56953, "netOwner": 50929, "opex": 8000, "noi": 42929, "bookings": 38},
-    {"month": "Apr", "adr": 425, "occ": 75, "gross": 57375, "netOwner": 51295, "opex": 7500, "noi": 43795, "bookings": 35},
-    {"month": "May", "adr": 420, "occ": 75, "gross": 58590, "netOwner": 52382, "opex": 7500, "noi": 44882, "bookings": 36},
-    {"month": "Jun", "adr": 480, "occ": 80, "gross": 69120, "netOwner": 61775, "opex": 7000, "noi": 54775, "bookings": 40},
-    {"month": "Jul", "adr": 500, "occ": 82, "gross": 76260, "netOwner": 68169, "opex": 7000, "noi": 61169, "bookings": 44},
-    {"month": "Aug", "adr": 480, "occ": 80, "gross": 71424, "netOwner": 63853, "opex": 7000, "noi": 56853, "bookings": 42},
-    {"month": "Sep", "adr": 375, "occ": 68, "gross": 45900, "netOwner": 41035, "opex": 7500, "noi": 33535, "bookings": 32},
-    {"month": "Oct", "adr": 375, "occ": 65, "gross": 45338, "netOwner": 40532, "opex": 7500, "noi": 33032, "bookings": 30},
-    {"month": "Nov", "adr": 385, "occ": 70, "gross": 48510, "netOwner": 43368, "opex": 7500, "noi": 35868, "bookings": 33},
-    {"month": "Dec", "adr": 390, "occ": 75, "gross": 54405, "netOwner": 48638, "opex": 8000, "noi": 40638, "bookings": 37},
-]
+# Seasonal indices for Santa Barbara STR market
+# These define the SHAPE of ADR and occupancy across the year, relative to
+# the annual average (1.0). The actual LEVEL is auto-calibrated from closed-month
+# actuals each time build.py runs — these just control the seasonal curve.
+SB_ADR_SEASONAL = {
+    1: 0.75, 2: 0.95, 3: 1.00, 4: 1.05, 5: 1.10, 6: 1.20,
+    7: 1.25, 8: 1.20, 9: 0.95, 10: 0.90, 11: 0.90, 12: 0.95,
+}
+SB_OCC_SEASONAL = {
+    1: 0.90, 2: 0.97, 3: 1.00, 4: 0.97, 5: 1.00, 6: 1.07,
+    7: 1.10, 8: 1.07, 9: 0.90, 10: 0.85, 11: 0.88, 12: 0.93,
+}
+MAX_OCCUPANCY_PCT = 92  # cap for projected occupancy
 
 # ════════════════════════════════════════════════════════════════
 # HELPERS
@@ -402,9 +388,11 @@ def compute(bookings, expenses):
 
     # Monthly expenses
     exp_monthly = defaultdict(lambda: {"total": 0, "cleaning": 0, "supplies": 0,
-                                        "capex": 0, "maint": 0, "marketing": 0, "other": 0})
+                                        "capex": 0, "maint": 0, "marketing": 0,
+                                        "mgmt": 0, "taxes": 0, "other": 0})
     cat_map = {"Cleaning": "cleaning", "Supplies": "supplies", "CapEx": "capex",
-               "Maintenance": "maint", "Marketing": "marketing"}
+               "Maintenance": "maint", "Marketing": "marketing",
+               "Management": "mgmt", "Taxes & Licenses": "taxes"}
     for e in expenses:
         mk = month_key(e["date"])
         if mk:
@@ -442,34 +430,177 @@ def compute(bookings, expenses):
     realized_bookings = sum(1 for b in bookings if b["type"] in ("past", "current"))
     cost_per_turn = round(cleaning_total / realized_bookings) if realized_bookings and cleaning_total > 0 else 111
 
-    # ── Pro forma calculations ──
-    pf_gross = sum(m["gross"] for m in PF_MONTHLY)
-    pf_net_owner = sum(m["netOwner"] for m in PF_MONTHLY)
-    pf_opex = sum(m["opex"] for m in PF_MONTHLY)
+    # ── Dynamic Pro Forma ──
+    # Auto-calibrates with each data upload: closed months use actual income + expenses,
+    # future months project from de-seasonalized baselines × seasonal shape.
+    # The more months that close, the more accurate forward projections become.
+    MONTH_NAMES_PF = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+
+    # Build actual revenue lookup keyed by month abbreviation (2026 only)
+    actual_rev = {}
+    for md in monthly_data:
+        parts = md["month"].split(" '")
+        if len(parts) == 2 and int(parts[1]) + 2000 == 2026:
+            actual_rev[parts[0]] = md
+
+    # Build actual expense lookup
+    actual_exp_lookup = {}
+    for ed in expense_monthly:
+        parts = ed["month"].split(" '")
+        if len(parts) == 2 and int(parts[1]) + 2000 == 2026:
+            actual_exp_lookup[parts[0]] = ed
+
+    # Classify months as closed / current / future
+    month_status = {}
+    for i, name in enumerate(MONTH_NAMES_PF):
+        mn = i + 1
+        m_end = date(2026, mn, calendar.monthrange(2026, mn)[1])
+        m_start = date(2026, mn, 1)
+        if m_end < today:
+            month_status[name] = "closed"
+        elif m_start <= today <= m_end:
+            month_status[name] = "current"
+        else:
+            month_status[name] = "future"
+
+    # Collect closed-month metrics for baseline calibration
+    closed_metrics = []
+    for name in MONTH_NAMES_PF:
+        if month_status[name] == "closed" and name in actual_rev:
+            mn = MONTH_NAMES_PF.index(name) + 1
+            closed_metrics.append({
+                "num": mn, "adr": actual_rev[name]["adr"],
+                "occ": actual_rev[name]["occupancy"],
+            })
+
+    # De-seasonalize closed months to find baseline ADR and occupancy.
+    # Dividing each month's actual by its seasonal index strips out seasonality,
+    # revealing the underlying performance level. Averaging these gives a stable
+    # baseline that improves as more months close.
+    if closed_metrics:
+        ds_adrs = [cm["adr"] / SB_ADR_SEASONAL[cm["num"]] for cm in closed_metrics]
+        ds_occs = [cm["occ"] / SB_OCC_SEASONAL[cm["num"]] for cm in closed_metrics]
+        baseline_adr = sum(ds_adrs) / len(ds_adrs)
+        baseline_occ = sum(ds_occs) / len(ds_occs)
+    else:
+        baseline_adr = float(SB_MEDIAN_ADR)
+        baseline_occ = 75.0
+
+    # Owner margin from actual booking data
+    actual_margin = total_to_owner / total_gross if total_gross else 0.89
+
+    # Expense baselines from closed months
+    # Management is deducted separately as 10% of gross — excluded from OpEx here
+    closed_opex_non_clean = []
+    clean_per_turn_monthly = []
+    for name in MONTH_NAMES_PF:
+        if month_status[name] == "closed" and name in actual_exp_lookup and name in actual_rev:
+            exp = actual_exp_lookup[name]
+            non_clean = exp["total"] - exp["cleaning"] - exp.get("mgmt", 0)
+            closed_opex_non_clean.append(non_clean)
+            if actual_rev[name]["bookings"] > 0 and exp["cleaning"] > 0:
+                clean_per_turn_monthly.append(exp["cleaning"] / actual_rev[name]["bookings"])
+
+    # Non-cleaning OpEx: trailing average, dropping first month if it's a startup outlier
+    if len(closed_opex_non_clean) >= 2:
+        first = closed_opex_non_clean[0]
+        rest_avg = sum(closed_opex_non_clean[1:]) / len(closed_opex_non_clean[1:])
+        trailing_non_clean = rest_avg if first > rest_avg * 1.4 else (
+            sum(closed_opex_non_clean) / len(closed_opex_non_clean))
+    elif closed_opex_non_clean:
+        trailing_non_clean = closed_opex_non_clean[0]
+    else:
+        trailing_non_clean = 5000
+
+    # Cleaning cost per turn: drop first month if it's a startup outlier
+    if len(clean_per_turn_monthly) >= 2:
+        first = clean_per_turn_monthly[0]
+        rest_avg = sum(clean_per_turn_monthly[1:]) / len(clean_per_turn_monthly[1:])
+        clean_cost = rest_avg if first > rest_avg * 1.3 else (
+            sum(clean_per_turn_monthly) / len(clean_per_turn_monthly))
+    elif clean_per_turn_monthly:
+        clean_cost = clean_per_turn_monthly[0]
+    else:
+        clean_cost = cost_per_turn
+
+    # ── Build pro forma monthly entries ──
+    pf_monthly = []
+    pf_total_cleaning = 0
+    pf_total_other_opex = 0
+
+    for i, name in enumerate(MONTH_NAMES_PF):
+        mn = i + 1
+        status = month_status[name]
+        avail_days = calendar.monthrange(2026, mn)[1]
+        avail_nights = NUM_UNITS * avail_days
+
+        if status in ("closed", "current") and name in actual_rev:
+            # Use actual income + actual expenses from the uploaded data
+            rev = actual_rev[name]
+            exp = actual_exp_lookup.get(name)
+            if exp:
+                month_opex = exp["total"] - exp.get("mgmt", 0)
+                month_clean = exp["cleaning"]
+            else:
+                month_opex = 0
+                month_clean = 0
+            pf_total_cleaning += month_clean
+            pf_total_other_opex += month_opex - month_clean
+            pf_monthly.append({
+                "month": name, "adr": rev["adr"], "occ": rev["occupancy"],
+                "gross": rev["gross"], "netOwner": rev["toOwner"],
+                "opex": round(month_opex), "noi": round(rev["toOwner"] - month_opex),
+                "bookings": rev["bookings"],
+                "source": "actual" if status == "closed" else "booked",
+            })
+        else:
+            # Project from de-seasonalized baseline × seasonal index
+            proj_adr = round(baseline_adr * SB_ADR_SEASONAL[mn])
+            proj_occ = min(round(baseline_occ * SB_OCC_SEASONAL[mn], 1), MAX_OCCUPANCY_PCT)
+            proj_nights = round(avail_nights * proj_occ / 100)
+            proj_gross = round(proj_adr * proj_nights)
+            proj_net = round(proj_gross * actual_margin)
+            proj_bookings = max(1, round(proj_nights / avg_stay)) if avg_stay else round(proj_nights / 2.7)
+            proj_cleaning = round(clean_cost * proj_bookings)
+            proj_opex = proj_cleaning + round(trailing_non_clean)
+            pf_total_cleaning += proj_cleaning
+            pf_total_other_opex += round(trailing_non_clean)
+            pf_monthly.append({
+                "month": name, "adr": proj_adr, "occ": proj_occ,
+                "gross": proj_gross, "netOwner": proj_net,
+                "opex": proj_opex, "noi": proj_net - proj_opex,
+                "bookings": proj_bookings, "source": "projected",
+            })
+
+    # ── Pro forma totals ──
+    pf_gross = sum(m["gross"] for m in pf_monthly)
+    pf_net_owner = sum(m["netOwner"] for m in pf_monthly)
+    pf_opex = sum(m["opex"] for m in pf_monthly)
     pf_noi_before_fixed = pf_net_owner - pf_opex
     mgmt_fee = round(pf_gross * MGMT_FEE_PCT)
     pf_noi_after_known = pf_noi_before_fixed - mgmt_fee - PROPERTY_TAX_ANNUAL - INSURANCE_ANNUAL - OTHER_FIXED_ANNUAL
-    pf_avg_occ = sum(m["occ"] for m in PF_MONTHLY) / 12
-    pf_avg_adr = round(sum(m["adr"] for m in PF_MONTHLY) / 12)
+    pf_avg_occ = sum(m["occ"] for m in pf_monthly) / 12
+    pf_avg_adr = round(sum(m["adr"] for m in pf_monthly) / 12)
 
-    # Waterfall
+    # Waterfall using actual deduction ratios from booking data
+    tax_rate = (total_taxes / total_gross) if total_gross else 0.12
+    proc_rate = (total_processing / total_gross) if total_gross else 0.025
     pf_total_ota = round(pf_gross * (ota_pct / 100))
-    pf_total_tax = round(pf_gross * 0.12)  # ~12% TOT
-    pf_total_proc = round(pf_gross * 0.025)
+    pf_total_tax = round(pf_gross * tax_rate)
+    pf_total_proc = round(pf_gross * proc_rate)
     pf_waterfall = [
         {"name": "Gross Revenue", "value": pf_gross, "type": "positive"},
         {"name": "OTA Commissions", "value": -pf_total_ota, "type": "negative"},
         {"name": "Taxes (TOT)", "value": -pf_total_tax, "type": "negative"},
         {"name": "Processing", "value": -pf_total_proc, "type": "negative"},
         {"name": "Net to Owner", "value": pf_net_owner, "type": "subtotal"},
-        {"name": "Cleaning", "value": -round(pf_opex * 0.83), "type": "opex"},
-        {"name": "Supplies/Maint", "value": -round(pf_opex * 0.14), "type": "opex"},
-        {"name": "Other OpEx", "value": -round(pf_opex * 0.03), "type": "opex"},
+        {"name": "Cleaning", "value": -round(pf_total_cleaning), "type": "opex"},
+        {"name": "Supplies/Maint/Other", "value": -round(pf_total_other_opex), "type": "opex"},
         {"name": "Mgmt Fee (10%)", "value": -mgmt_fee, "type": "mgmt"},
         {"name": "Property Tax", "value": -PROPERTY_TAX_ANNUAL, "type": "opex"},
         {"name": "Insurance", "value": -INSURANCE_ANNUAL, "type": "opex"},
         {"name": "Other Fixed (6 items)", "value": -OTHER_FIXED_ANNUAL, "type": "opex"},
-        {"name": "NOI (excl. remaining TBD)", "value": pf_noi_after_known, "type": "total"},
+        {"name": "NOI", "value": pf_noi_after_known, "type": "total"},
     ]
 
     # ── Benchmark data ──
@@ -495,131 +626,80 @@ def compute(bookings, expenses):
     total_occupancy = round(realized_nights / total_avail_nights * 100, 1) if total_avail_nights else 0
     blended_revpar = round(realized_gross / total_avail_nights) if total_avail_nights else 0
 
-    # ── Actuals vs Pro Forma + Forward Pace + Cumulative + Blended ──
-    # Build lookup of actual monthly data keyed by PF-style month name
-    actual_lookup = {}  # "Jan" → {gross, toOwner, bookings, nights, occ, adr}
-    for md in monthly_data:
-        # Convert "Jan '26" → "Jan", "Feb '26" → "Feb", "Dec '25" → skip (opening month, not in PF)
-        mk = md["month"]
-        parts = mk.split(" '")
-        if len(parts) == 2:
-            month_abbr = parts[0]
-            yr = int(parts[1]) + 2000
-            # PF covers Jan-Dec 2026. Dec '25 is NOT in PF.
-            if yr == 2026:
-                actual_lookup[month_abbr] = md
-
-    # Determine which months are closed vs current vs future
-    current_month_abbr = today.strftime("%b")
-    current_year = today.year
+    # ── Actuals vs Model Projection + Forward Pace + Cumulative + Blended ──
+    # The seasonal model's projection for each month (for comparison, even against closed months)
+    model_projections = {}
+    for i, name in enumerate(MONTH_NAMES_PF):
+        mn = i + 1
+        avail_nights = NUM_UNITS * calendar.monthrange(2026, mn)[1]
+        proj_adr = round(baseline_adr * SB_ADR_SEASONAL[mn])
+        proj_occ = min(round(baseline_occ * SB_OCC_SEASONAL[mn], 1), MAX_OCCUPANCY_PCT)
+        proj_nights = round(avail_nights * proj_occ / 100)
+        model_projections[name] = round(proj_adr * proj_nights)
 
     actuals_vs_pf = []
     cumulative_trajectory = []
     forward_pace = []
-    blended_forecast = []
     actual_cumulative = 0
     pf_cumulative = 0
-    blended_gross_total = 0
-    blended_net_total = 0
 
-    for pf_entry in PF_MONTHLY:
-        pf_month = pf_entry["month"]  # "Jan", "Feb", etc.
-        pf_gross_mo = pf_entry["gross"]
-        pf_net_mo = pf_entry["netOwner"]
+    for i, name in enumerate(MONTH_NAMES_PF):
+        status = month_status[name]
+        pf_gross_mo = pf_monthly[i]["gross"]
+        model_gross = model_projections[name]
 
-        # Determine status
-        month_num = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"].index(pf_month) + 1
-        month_end = date(2026, month_num, calendar.monthrange(2026, month_num)[1])
-        month_start = date(2026, month_num, 1)
+        booked = actual_rev.get(name)
+        booked_gross = booked["gross"] if booked else 0
 
-        if month_end < today:
-            status = "closed"
-        elif month_start <= today <= month_end:
-            status = "current"
+        if status == "closed" and booked_gross:
+            variance = round(booked_gross - model_gross)
+            variance_pct = round((booked_gross - model_gross) / model_gross * 100, 1) if model_gross else None
         else:
-            status = "future"
-
-        actual = actual_lookup.get(pf_month)
-        actual_gross_mo = actual["gross"] if actual else 0
-        actual_net_mo = actual["toOwner"] if actual else 0
-
-        # Variance (only meaningful for closed months)
-        variance = round(actual_gross_mo - pf_gross_mo) if status == "closed" else None
-        variance_pct = round((actual_gross_mo - pf_gross_mo) / pf_gross_mo * 100, 1) if status == "closed" and pf_gross_mo else None
+            variance = None
+            variance_pct = None
 
         actuals_vs_pf.append({
-            "month": pf_month,
-            "pfGross": pf_gross_mo,
-            "actualGross": actual_gross_mo if status == "closed" else 0,
-            "bookedGross": actual_gross_mo if status in ("current", "future") else 0,
+            "month": name,
+            "pfGross": model_gross,
+            "actualGross": booked_gross if status == "closed" else 0,
+            "bookedGross": booked_gross if status in ("current", "future") else 0,
             "variance": variance,
             "variancePct": variance_pct,
             "status": status,
         })
 
-        # Cumulative trajectory
         pf_cumulative += pf_gross_mo
-        if status == "closed":
-            actual_cumulative += actual_gross_mo
-        elif status == "current":
-            actual_cumulative += actual_gross_mo  # partial month, show what we have
+        if status in ("closed", "current"):
+            actual_cumulative += booked_gross
         cumulative_trajectory.append({
-            "month": pf_month,
+            "month": name,
             "actualCumulative": round(actual_cumulative),
             "pfCumulative": round(pf_cumulative),
         })
 
-        # Forward pace (future + current months only)
         if status in ("current", "future"):
-            pace_pct = round(actual_gross_mo / pf_gross_mo * 100, 1) if pf_gross_mo else 0
+            pace_pct = round(booked_gross / pf_gross_mo * 100, 1) if pf_gross_mo and booked_gross else 0
             forward_pace.append({
-                "month": pf_month,
+                "month": name,
                 "pfGross": pf_gross_mo,
-                "bookedGross": round(actual_gross_mo),
+                "bookedGross": round(booked_gross),
                 "pacePct": pace_pct,
             })
 
-        # Blended forecast: actuals for closed, PF for future
-        if status == "closed" and actual:
-            blended_forecast.append({
-                "month": pf_month,
-                "gross": actual["gross"],
-                "netOwner": actual["toOwner"],
-                "adr": actual["adr"],
-                "occ": actual.get("occupancy", pf_entry["occ"]),
-                "opex": pf_entry["opex"],  # use PF opex (actuals don't have monthly opex breakdown yet)
-                "noi": actual["toOwner"] - pf_entry["opex"],
-                "source": "actual",
-            })
-            blended_gross_total += actual["gross"]
-            blended_net_total += actual["toOwner"]
-        else:
-            blended_forecast.append({
-                "month": pf_month,
-                "gross": pf_gross_mo,
-                "netOwner": pf_net_mo,
-                "adr": pf_entry["adr"],
-                "occ": pf_entry["occ"],
-                "opex": pf_entry["opex"],
-                "noi": pf_entry["noi"],
-                "source": "projected",
-            })
-            blended_gross_total += pf_gross_mo
-            blended_net_total += pf_net_mo
-
-    # Blended totals
-    blended_opex = sum(bf["opex"] for bf in blended_forecast)
-    blended_noi_before_fixed = blended_net_total - blended_opex
-    blended_mgmt = round(blended_gross_total * MGMT_FEE_PCT)
-    blended_noi_after_known = blended_noi_before_fixed - blended_mgmt - PROPERTY_TAX_ANNUAL - INSURANCE_ANNUAL - OTHER_FIXED_ANNUAL
+    # Blended forecast = the dynamic pro forma itself (actuals + projections)
+    blended_forecast = [{
+        "month": m["month"], "gross": m["gross"], "netOwner": m["netOwner"],
+        "adr": m["adr"], "occ": m["occ"], "opex": m["opex"],
+        "noi": m["noi"], "source": m["source"],
+    } for m in pf_monthly]
 
     blended_totals = {
-        "gross": round(blended_gross_total),
-        "netOwner": round(blended_net_total),
-        "opex": blended_opex,
-        "mgmtFee": blended_mgmt,
-        "noiBeforeFixed": round(blended_noi_before_fixed),
-        "noiAfterKnown": round(blended_noi_after_known),
+        "gross": round(pf_gross),
+        "netOwner": round(pf_net_owner),
+        "opex": pf_opex,
+        "mgmtFee": mgmt_fee,
+        "noiBeforeFixed": round(pf_noi_before_fixed),
+        "noiAfterKnown": round(pf_noi_after_known),
     }
 
     return {
@@ -658,7 +738,7 @@ def compute(bookings, expenses):
         "blendedForecast": blended_forecast,
         "blendedTotals": blended_totals,
         "proForma": {
-            "monthly": PF_MONTHLY,
+            "monthly": pf_monthly,
             "waterfall": pf_waterfall,
             "gross": pf_gross,
             "netOwner": pf_net_owner,
@@ -672,6 +752,9 @@ def compute(bookings, expenses):
             "avgOcc": round(pf_avg_occ, 1),
             "avgAdr": pf_avg_adr,
             "mgmtFeePct": MGMT_FEE_PCT,
+            "baselineAdr": round(baseline_adr),
+            "baselineOcc": round(baseline_occ, 1),
+            "closedMonths": len(closed_metrics),
         },
         "config": {
             "mgmtFeePct": MGMT_FEE_PCT,
