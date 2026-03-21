@@ -25,6 +25,7 @@ from pathlib import Path
 
 DATA_DIR = Path(__file__).parent / "data"
 OUTPUT = Path(__file__).parent / "public" / "data.js"
+FORECAST_HISTORY = DATA_DIR / "forecast_history.json"
 
 # ════════════════════════════════════════════════════════════════
 # CONFIG — Edit these when assumptions change
@@ -582,6 +583,85 @@ def compute(bookings, expenses):
     pf_avg_occ = sum(m["occ"] for m in pf_monthly) / 12
     pf_avg_adr = round(sum(m["adr"] for m in pf_monthly) / 12)
 
+    # ── Forecast Accuracy Feedback Loop ──
+    # Each build saves a snapshot of projected months. When those months later close,
+    # we compare the prior projection against actuals to measure forecast accuracy.
+    # This scorecard helps calibrate confidence and reveals systematic bias.
+    forecast_history = {}
+    if FORECAST_HISTORY.exists():
+        try:
+            with open(FORECAST_HISTORY, "r") as fh:
+                forecast_history = json.loads(fh.read())
+        except (json.JSONDecodeError, IOError):
+            forecast_history = {}
+
+    # Score prior forecasts against newly-closed actuals
+    forecast_scorecard = []
+    for entry in pf_monthly:
+        name = entry["month"]
+        if entry["source"] != "actual":
+            continue
+        # Check if we had a prior projection for this now-actual month
+        prior = forecast_history.get(name)
+        if not prior:
+            continue
+        actual_gross = entry["gross"]
+        actual_adr = entry["adr"]
+        actual_occ = entry["occ"]
+        actual_opex = entry["opex"]
+        forecast_scorecard.append({
+            "month": name,
+            "forecastDate": prior.get("forecastDate", "unknown"),
+            "projGross": prior["gross"], "actGross": actual_gross,
+            "grossErr": round((prior["gross"] - actual_gross) / actual_gross * 100, 1) if actual_gross else 0,
+            "projAdr": prior["adr"], "actAdr": actual_adr,
+            "adrErr": round((prior["adr"] - actual_adr) / actual_adr * 100, 1) if actual_adr else 0,
+            "projOcc": prior["occ"], "actOcc": actual_occ,
+            "occErr": round((prior["occ"] - actual_occ) / actual_occ * 100, 1) if actual_occ else 0,
+            "projOpex": prior["opex"], "actOpex": actual_opex,
+            "opexErr": round((prior["opex"] - actual_opex) / actual_opex * 100, 1) if actual_opex else 0,
+        })
+
+    # Compute aggregate accuracy metrics if we have scored months
+    if forecast_scorecard:
+        avg_gross_err = sum(abs(s["grossErr"]) for s in forecast_scorecard) / len(forecast_scorecard)
+        avg_adr_err = sum(abs(s["adrErr"]) for s in forecast_scorecard) / len(forecast_scorecard)
+        avg_occ_err = sum(abs(s["occErr"]) for s in forecast_scorecard) / len(forecast_scorecard)
+        gross_bias = sum(s["grossErr"] for s in forecast_scorecard) / len(forecast_scorecard)
+        forecast_accuracy = {
+            "scoredMonths": len(forecast_scorecard),
+            "mapeGross": round(avg_gross_err, 1),
+            "mapeAdr": round(avg_adr_err, 1),
+            "mapeOcc": round(avg_occ_err, 1),
+            "biasGross": round(gross_bias, 1),  # positive = over-projecting
+            "details": forecast_scorecard,
+        }
+    else:
+        forecast_accuracy = {
+            "scoredMonths": 0,
+            "mapeGross": None, "mapeAdr": None, "mapeOcc": None,
+            "biasGross": None, "details": [],
+        }
+
+    # Save current projections as the new snapshot for future scoring.
+    # Only save months that are currently projected (not actual/booked) so we
+    # don't overwrite a prior projection with an actual value.
+    build_date = today.isoformat()
+    for entry in pf_monthly:
+        name = entry["month"]
+        if entry["source"] == "projected":
+            forecast_history[name] = {
+                "gross": entry["gross"], "adr": entry["adr"],
+                "occ": entry["occ"], "opex": entry["opex"],
+                "netOwner": entry["netOwner"], "noi": entry["noi"],
+                "bookings": entry["bookings"],
+                "forecastDate": build_date,
+            }
+
+    # Persist the forecast history
+    with open(FORECAST_HISTORY, "w") as fh:
+        fh.write(json.dumps(forecast_history, indent=2))
+
     # Waterfall using actual deduction ratios from booking data
     tax_rate = (total_taxes / total_gross) if total_gross else 0.12
     proc_rate = (total_processing / total_gross) if total_gross else 0.025
@@ -756,6 +836,7 @@ def compute(bookings, expenses):
             "baselineOcc": round(baseline_occ, 1),
             "closedMonths": len(closed_metrics),
         },
+        "forecastAccuracy": forecast_accuracy,
         "config": {
             "mgmtFeePct": MGMT_FEE_PCT,
             "propertyTaxAnnual": PROPERTY_TAX_ANNUAL,

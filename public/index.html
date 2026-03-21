@@ -606,6 +606,78 @@
                 </div>
               </div>
 
+              {/* ── FORECAST ACCURACY SCORECARD ── */}
+              {D.forecastAccuracy && D.forecastAccuracy.scoredMonths > 0 && (
+                <div style={{ background: COLORS.white, borderRadius: 12, padding: 24,
+                  boxShadow: "0 1px 3px rgba(0,0,0,0.06)", marginBottom: 24 }}>
+                  <SectionTitle>Forecast Accuracy Scorecard</SectionTitle>
+                  <div style={{ fontSize: 12, color: COLORS.warmGray, marginBottom: 16 }}>
+                    Comparing prior projections against actual results for {D.forecastAccuracy.scoredMonths} closed month{D.forecastAccuracy.scoredMonths > 1 ? "s" : ""}.
+                    {D.forecastAccuracy.biasGross > 0
+                      ? ` Model tends to over-project gross revenue by ~${D.forecastAccuracy.biasGross}%.`
+                      : D.forecastAccuracy.biasGross < 0
+                        ? ` Model tends to under-project gross revenue by ~${Math.abs(D.forecastAccuracy.biasGross)}%.`
+                        : ""}
+                  </div>
+                  {/* Aggregate MAPE cards */}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 20 }}>
+                    {[
+                      { label: "Gross Revenue MAPE", val: D.forecastAccuracy.mapeGross },
+                      { label: "ADR MAPE", val: D.forecastAccuracy.mapeAdr },
+                      { label: "Occupancy MAPE", val: D.forecastAccuracy.mapeOcc },
+                    ].map((card, i) => (
+                      <div key={i} style={{ background: card.val <= 5 ? "#F0FFF4" : card.val <= 15 ? "#FFFFF0" : "#FFF5F5",
+                        borderRadius: 8, padding: 16, textAlign: "center", border: "1px solid #eee" }}>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: COLORS.warmGray, letterSpacing: 1, textTransform: "uppercase" }}>{card.label}</div>
+                        <div style={{ fontSize: 28, fontWeight: 700, marginTop: 4,
+                          color: card.val <= 5 ? COLORS.green : card.val <= 15 ? COLORS.gold : COLORS.red }}>{card.val}%</div>
+                        <div style={{ fontSize: 10, color: "#888", marginTop: 2 }}>
+                          {card.val <= 5 ? "Excellent" : card.val <= 10 ? "Good" : card.val <= 15 ? "Fair" : "Needs calibration"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Per-month detail table */}
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ borderBottom: "2px solid #ddd" }}>
+                        <th style={{ textAlign: "left", padding: "8px 10px", fontWeight: 700, color: COLORS.warmGray, fontSize: 10, letterSpacing: 1 }}>MONTH</th>
+                        <th style={{ textAlign: "left", padding: "8px 10px", fontWeight: 700, color: COLORS.warmGray, fontSize: 10, letterSpacing: 1 }}>FORECAST DATE</th>
+                        <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 700, color: COLORS.warmGray, fontSize: 10, letterSpacing: 1 }}>PROJ GROSS</th>
+                        <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 700, color: COLORS.warmGray, fontSize: 10, letterSpacing: 1 }}>ACT GROSS</th>
+                        <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 700, color: COLORS.warmGray, fontSize: 10, letterSpacing: 1 }}>ERROR</th>
+                        <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 700, color: COLORS.warmGray, fontSize: 10, letterSpacing: 1 }}>PROJ ADR</th>
+                        <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 700, color: COLORS.warmGray, fontSize: 10, letterSpacing: 1 }}>ACT ADR</th>
+                        <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 700, color: COLORS.warmGray, fontSize: 10, letterSpacing: 1 }}>PROJ OCC</th>
+                        <th style={{ textAlign: "right", padding: "8px 10px", fontWeight: 700, color: COLORS.warmGray, fontSize: 10, letterSpacing: 1 }}>ACT OCC</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {D.forecastAccuracy.details.map((s, i) => (
+                        <tr key={i} style={{ borderBottom: "1px solid #eee" }}>
+                          <td style={{ padding: "8px 10px", fontWeight: 600 }}>{s.month}</td>
+                          <td style={{ padding: "8px 10px", color: "#888" }}>{s.forecastDate}</td>
+                          <td style={{ padding: "8px 10px", textAlign: "right" }}>{fmt(s.projGross)}</td>
+                          <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600 }}>{fmt(s.actGross)}</td>
+                          <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600,
+                            color: Math.abs(s.grossErr) <= 5 ? COLORS.green : Math.abs(s.grossErr) <= 15 ? COLORS.gold : COLORS.red }}>
+                            {s.grossErr > 0 ? "+" : ""}{s.grossErr}%
+                          </td>
+                          <td style={{ padding: "8px 10px", textAlign: "right" }}>{fmt(s.projAdr)}</td>
+                          <td style={{ padding: "8px 10px", textAlign: "right" }}>{fmt(s.actAdr)}</td>
+                          <td style={{ padding: "8px 10px", textAlign: "right" }}>{s.projOcc}%</td>
+                          <td style={{ padding: "8px 10px", textAlign: "right" }}>{s.actOcc}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div style={{ fontSize: 11, color: "#888", marginTop: 12, fontStyle: "italic" }}>
+                    MAPE = Mean Absolute Percentage Error. Lower is better. Green ≤ 5% | Gold ≤ 15% | Red > 15%.
+                    Scored months are those where a prior build projected values that later became actuals.
+                  </div>
+                </div>
+              )}
+
               {/* ── FULL-YEAR FORECAST ── */}
               <SectionTitle>Full-Year Forecast</SectionTitle>
 
