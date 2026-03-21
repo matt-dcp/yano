@@ -132,6 +132,13 @@
       const S = D.summary;
       const PF = D.proForma;
 
+      // YTD & projection metrics from dynamic pro forma
+      const ytdMonths = (PF.monthly || []).filter(m => m.source === "actual" || m.source === "booked");
+      const ytdGross = ytdMonths.reduce((s, m) => s + m.gross, 0);
+      const ytdNetOwner = ytdMonths.reduce((s, m) => s + m.netOwner, 0);
+      const ytdOpex = ytdMonths.reduce((s, m) => s + m.opex, 0);
+      const ytdNoi = ytdMonths.reduce((s, m) => s + m.noi, 0);
+
       // Add colors to source data
       const sourceData = D.sourceData.map((s, i) => ({ ...s, color: PIE_COLORS[i % PIE_COLORS.length] }));
       // Add colors to expense categories
@@ -143,7 +150,7 @@
         { id: "channels", label: "Channels" },
         { id: "units", label: "Units" },
         { id: "expenses", label: "Expenses" },
-        { id: "proforma", label: "Performance vs Plan" },
+        { id: "proforma", label: "YTD & Forecast" },
         { id: "benchmark", label: "vs SB Market" },
       ];
 
@@ -508,23 +515,101 @@
 
             {/* ═══ PERFORMANCE VS PLAN ═══ */}
             {tab === "proforma" && (<>
-              {/* KPI Summary */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 16, marginBottom: 24 }}>
-                <KPICard label="YTD Actual Gross" value={fmtK(S.totalGross)}
-                  sub={`${D.actualsVsPf.filter(a => a.status === "closed").length} months closed`} accent={COLORS.gold} />
-                <KPICard label="Blended Annual Gross" value={fmtK(D.blendedTotals.gross)}
-                  sub="Actuals + PF forward" accent={COLORS.green} />
-                <KPICard label="Blended NOI" value={fmtK(D.blendedTotals.noiAfterKnown)}
-                  sub={`${(D.blendedTotals.noiAfterKnown / D.blendedTotals.gross * 100).toFixed(1)}% margin`} accent={COLORS.gold} />
-                <KPICard label="YTD Occupancy" value={`${S.totalOccupancy}%`}
-                  sub="Realized to date" accent={COLORS.green} />
-                <KPICard label="RevPAR" value={fmt(S.blendedRevPar)}
-                  sub="Rev per avail night" accent={COLORS.blue} />
-                <KPICard label="PF Avg ADR" value={fmt(PF.avgAdr)}
-                  sub={`Actual: ${fmt(S.blendedAdr)}`} accent={COLORS.warmGray} />
+              {/* Model calibration banner + legend */}
+              <div style={{ background: COLORS.blueLight, borderRadius: 8, padding: "12px 20px",
+                marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center",
+                border: `1px solid ${COLORS.blue}33`, fontSize: 12, color: COLORS.warmGray, flexWrap: "wrap", gap: 8 }}>
+                <div>
+                  Model calibrated from <strong style={{ color: COLORS.charcoal }}>{PF.closedMonths || 0} closed month{PF.closedMonths !== 1 ? "s" : ""}</strong>.
+                  {" "}Baseline ADR: <strong style={{ color: COLORS.charcoal }}>{fmt(PF.baselineAdr || 0)}</strong> | Occupancy: <strong style={{ color: COLORS.charcoal }}>{PF.baselineOcc || 0}%</strong>
+                </div>
+                <div style={{ display: "flex", gap: 16, fontSize: 11 }}>
+                  <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: COLORS.gold, marginRight: 4, verticalAlign: "middle" }} />Actual</span>
+                  <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: COLORS.blue, marginRight: 4, verticalAlign: "middle" }} />Booked</span>
+                  <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "#D4D4D4", marginRight: 4, verticalAlign: "middle" }} />Projected</span>
+                </div>
               </div>
 
-              {/* Actuals vs PF bar chart */}
+              {/* ── YTD PERFORMANCE ── */}
+              <SectionTitle>Year-to-Date Performance</SectionTitle>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 16, marginBottom: 24 }}>
+                <KPICard label="YTD Gross Revenue" value={fmtK(ytdGross)}
+                  sub={`${ytdMonths.length} month${ytdMonths.length !== 1 ? "s" : ""} of data`} accent={COLORS.gold} />
+                <KPICard label="YTD Net to Owner" value={fmtK(ytdNetOwner)}
+                  sub={ytdGross ? `${(ytdNetOwner / ytdGross * 100).toFixed(1)}% margin` : ""} accent={COLORS.green} />
+                <KPICard label="YTD Operating Expenses" value={fmtK(ytdOpex)}
+                  sub="From uploaded expense data" accent={COLORS.red} />
+                <KPICard label="YTD NOI" value={fmtK(ytdNoi)}
+                  sub={ytdGross ? `${(ytdNoi / ytdGross * 100).toFixed(1)}% NOI margin` : ""} accent={COLORS.gold} />
+              </div>
+
+              {/* Monthly P&L Table */}
+              <div style={{ background: COLORS.white, borderRadius: 12, padding: 24,
+                boxShadow: "0 1px 3px rgba(0,0,0,0.06)", marginBottom: 32 }}>
+                <SectionTitle>Monthly Performance Detail</SectionTitle>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 700 }}>
+                    <thead>
+                      <tr style={{ borderBottom: `2px solid ${COLORS.gold}` }}>
+                        {["Month", "", "Gross", "Net to Owner", "OpEx", "NOI", "ADR", "Occ", "Bookings"].map(h => (
+                          <th key={h} style={{ padding: "8px 10px", textAlign: h === "Month" || h === "" ? "left" : "right",
+                            fontWeight: 700, fontSize: 11, textTransform: "uppercase", letterSpacing: 0.5,
+                            color: COLORS.warmGray }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(PF.monthly || []).map((m, i) => {
+                        const isActual = m.source === "actual";
+                        const isBooked = m.source === "booked";
+                        const bg = isActual ? "#F0F7F2" : isBooked ? "#EBF0F7" : i % 2 === 0 ? "#FAFAFA" : COLORS.white;
+                        const badge = isActual ? "Actual" : isBooked ? "Booked" : "Projected";
+                        const badgeColor = isActual ? COLORS.green : isBooked ? COLORS.blue : "#9CA3AF";
+                        return (
+                          <tr key={i} style={{ background: bg, borderBottom: `1px solid ${COLORS.lightGray}` }}>
+                            <td style={{ padding: "8px 10px", fontWeight: 600, color: COLORS.charcoal }}>{m.month}</td>
+                            <td style={{ padding: "8px 4px" }}>
+                              <span style={{ fontSize: 9, fontWeight: 700, color: badgeColor,
+                                background: `${badgeColor}18`, padding: "2px 8px", borderRadius: 4,
+                                textTransform: "uppercase", letterSpacing: 0.5, whiteSpace: "nowrap" }}>{badge}</span>
+                            </td>
+                            <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600 }}>{fmt(m.gross)}</td>
+                            <td style={{ padding: "8px 10px", textAlign: "right" }}>{fmt(m.netOwner)}</td>
+                            <td style={{ padding: "8px 10px", textAlign: "right", color: COLORS.red }}>{fmt(m.opex)}</td>
+                            <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 600, color: COLORS.green }}>{fmt(m.noi)}</td>
+                            <td style={{ padding: "8px 10px", textAlign: "right" }}>{fmt(m.adr)}</td>
+                            <td style={{ padding: "8px 10px", textAlign: "right" }}>{m.occ}%</td>
+                            <td style={{ padding: "8px 10px", textAlign: "right" }}>{m.bookings}</td>
+                          </tr>
+                        );
+                      })}
+                      <tr style={{ background: `${COLORS.gold}12`, borderTop: `2px solid ${COLORS.gold}` }}>
+                        <td style={{ padding: "10px 10px", fontWeight: 700 }}>YTD Subtotal</td>
+                        <td></td>
+                        <td style={{ padding: "10px 10px", textAlign: "right", fontWeight: 700 }}>{fmt(ytdGross)}</td>
+                        <td style={{ padding: "10px 10px", textAlign: "right", fontWeight: 700 }}>{fmt(ytdNetOwner)}</td>
+                        <td style={{ padding: "10px 10px", textAlign: "right", fontWeight: 700, color: COLORS.red }}>{fmt(ytdOpex)}</td>
+                        <td style={{ padding: "10px 10px", textAlign: "right", fontWeight: 700, color: COLORS.green }}>{fmt(ytdNoi)}</td>
+                        <td colSpan={3}></td>
+                      </tr>
+                      <tr style={{ background: COLORS.charcoal }}>
+                        <td style={{ padding: "10px 10px", fontWeight: 700, color: COLORS.white }}>Full Year</td>
+                        <td></td>
+                        <td style={{ padding: "10px 10px", textAlign: "right", fontWeight: 700, color: COLORS.gold }}>{fmt(PF.gross)}</td>
+                        <td style={{ padding: "10px 10px", textAlign: "right", fontWeight: 700, color: COLORS.white }}>{fmt(PF.netOwner)}</td>
+                        <td style={{ padding: "10px 10px", textAlign: "right", fontWeight: 700, color: "#E57373" }}>{fmt(PF.opex)}</td>
+                        <td style={{ padding: "10px 10px", textAlign: "right", fontWeight: 700, color: COLORS.gold }}>{fmt(PF.noiAfterKnown)}</td>
+                        <td colSpan={3}></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* ── FULL-YEAR FORECAST ── */}
+              <SectionTitle>Full-Year Forecast</SectionTitle>
+
+              {/* Actuals vs Projected bar chart */}
               <div style={{ background: COLORS.white, borderRadius: 12, padding: 24,
                 boxShadow: "0 1px 3px rgba(0,0,0,0.06)", marginBottom: 24 }}>
                 <SectionTitle>Monthly Revenue: Actual vs Forecast</SectionTitle>
@@ -598,7 +683,7 @@
                       <Tooltip content={<CustomTooltip />} />
                       <Bar dataKey="gross" name="Gross Revenue" radius={[4,4,0,0]}>
                         {D.blendedForecast.map((entry, i) => (
-                          <Cell key={i} fill={entry.source === "actual" ? COLORS.gold : COLORS.goldLight} />
+                          <Cell key={i} fill={entry.source === "actual" ? COLORS.gold : entry.source === "booked" ? "#5B9BD5" : "#D4D4D4"} />
                         ))}
                       </Bar>
                       <Line dataKey="noi" name="NOI" stroke={COLORS.green} strokeWidth={2.5}
@@ -606,7 +691,7 @@
                     </ComposedChart>
                   </ResponsiveContainer>
                   <div style={{ fontSize: 11, color: COLORS.warmGray, marginTop: 8, fontStyle: "italic" }}>
-                    Dark gold = Actual months | Light gold = Projected
+                    Gold = Actual | Blue = Booked | Gray = Projected
                   </div>
                 </div>
                 <div style={{ background: COLORS.white, borderRadius: 12, padding: 24,
@@ -621,7 +706,11 @@
                       <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v + "%"}
                         fontSize={11} tick={{ fill: COLORS.warmGray }} domain={[50, 100]} />
                       <Tooltip content={<CustomTooltip />} />
-                      <Bar dataKey="adr" name="ADR" fill={COLORS.gold} yAxisId="left" radius={[4,4,0,0]} />
+                      <Bar dataKey="adr" name="ADR" yAxisId="left" radius={[4,4,0,0]}>
+                        {D.blendedForecast.map((entry, i) => (
+                          <Cell key={i} fill={entry.source === "actual" ? COLORS.gold : entry.source === "booked" ? "#5B9BD5" : "#D4D4D4"} />
+                        ))}
+                      </Bar>
                       <Line dataKey="occ" name="Occupancy %" stroke={COLORS.blue} strokeWidth={2.5}
                         yAxisId="right" dot={{ r: 3, fill: COLORS.blue }} />
                     </ComposedChart>
@@ -690,15 +779,15 @@
                     <div key={i} style={{ textAlign: "center", padding: "4px 0" }}>
                       <div style={{ fontSize: 9, color: "#888" }}>{m.month}</div>
                       <div style={{ width: "100%", height: 4, borderRadius: 2, marginTop: 2,
-                        background: m.source === "actual" ? COLORS.gold : "#555" }} />
-                      <div style={{ fontSize: 8, color: m.source === "actual" ? COLORS.gold : "#666", marginTop: 2 }}>
-                        {m.source === "actual" ? "ACT" : "PF"}
+                        background: m.source === "actual" ? COLORS.gold : m.source === "booked" ? "#5B9BD5" : "#555" }} />
+                      <div style={{ fontSize: 8, color: m.source === "actual" ? COLORS.gold : m.source === "booked" ? "#5B9BD5" : "#666", marginTop: 2 }}>
+                        {m.source === "actual" ? "ACT" : m.source === "booked" ? "BKD" : "PROJ"}
                       </div>
                     </div>
                   ))}
                 </div>
                 <div style={{ fontSize: 11, color: "#666", marginTop: 12, fontStyle: "italic" }}>
-                  Blended forecast uses actual results for closed months and pro forma projections for future months.
+                  Gold = Actual (closed) | Blue = Booked (confirmed forward) | Gray = Projected (model estimate)
                 </div>
               </div>
             </>)}
