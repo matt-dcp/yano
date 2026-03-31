@@ -612,12 +612,14 @@
                   boxShadow: "0 1px 3px rgba(0,0,0,0.06)", marginBottom: 24 }}>
                   <SectionTitle>Forecast Accuracy Scorecard</SectionTitle>
                   <div style={{ fontSize: 12, color: COLORS.warmGray, marginBottom: 16 }}>
-                    Comparing prior projections against actual results for {D.forecastAccuracy.scoredMonths} closed month{D.forecastAccuracy.scoredMonths > 1 ? "s" : ""}.
+                    {D.forecastAccuracy.source === "backtest"
+                      ? `Model back-test: comparing the seasonal model's projection against actual results for ${D.forecastAccuracy.scoredMonths} closed month${D.forecastAccuracy.scoredMonths > 1 ? "s" : ""}. As more months close, snapshot-based scoring will replace this.`
+                      : `Comparing prior projections (saved at forecast time) against actual results for ${D.forecastAccuracy.scoredMonths} closed month${D.forecastAccuracy.scoredMonths > 1 ? "s" : ""}.`}
                     {D.forecastAccuracy.biasGross > 0
                       ? ` Model tends to over-project gross revenue by ~${D.forecastAccuracy.biasGross}%.`
                       : D.forecastAccuracy.biasGross < 0
                         ? ` Model tends to under-project gross revenue by ~${Math.abs(D.forecastAccuracy.biasGross)}%.`
-                        : ""}
+                        : " No systematic bias detected."}
                   </div>
                   {/* Aggregate MAPE cards */}
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 20 }}>

@@ -620,36 +620,71 @@ def compute(bookings, expenses):
             "occErr": round((prior["occ"] - actual_occ) / actual_occ * 100, 1) if actual_occ else 0,
             "projOpex": prior["opex"], "actOpex": actual_opex,
             "opexErr": round((prior["opex"] - actual_opex) / actual_opex * 100, 1) if actual_opex else 0,
+            "type": "snapshot",
         })
 
-    # Compute aggregate accuracy metrics if we have scored months
-    if forecast_scorecard:
-        avg_gross_err = sum(abs(s["grossErr"]) for s in forecast_scorecard) / len(forecast_scorecard)
-        avg_adr_err = sum(abs(s["adrErr"]) for s in forecast_scorecard) / len(forecast_scorecard)
-        avg_occ_err = sum(abs(s["occErr"]) for s in forecast_scorecard) / len(forecast_scorecard)
-        gross_bias = sum(s["grossErr"] for s in forecast_scorecard) / len(forecast_scorecard)
+    # Back-test: also score the model's current seasonal projection against closed actuals.
+    # This shows how well the seasonal model fits even without prior snapshots.
+    backtest_scorecard = []
+    for entry in pf_monthly:
+        name = entry["month"]
+        if entry["source"] != "actual":
+            continue
+        mn = MONTH_NAMES_PF.index(name) + 1
+        avail_nights = NUM_UNITS * calendar.monthrange(2026, mn)[1]
+        model_adr = round(baseline_adr * SB_ADR_SEASONAL[mn])
+        model_occ = min(round(baseline_occ * SB_OCC_SEASONAL[mn], 1), MAX_OCCUPANCY_PCT)
+        model_nights = round(avail_nights * model_occ / 100)
+        model_gross = round(model_adr * model_nights)
+        actual_gross = entry["gross"]
+        actual_adr = entry["adr"]
+        actual_occ = entry["occ"]
+        backtest_scorecard.append({
+            "month": name,
+            "forecastDate": "model",
+            "projGross": model_gross, "actGross": actual_gross,
+            "grossErr": round((model_gross - actual_gross) / actual_gross * 100, 1) if actual_gross else 0,
+            "projAdr": model_adr, "actAdr": actual_adr,
+            "adrErr": round((model_adr - actual_adr) / actual_adr * 100, 1) if actual_adr else 0,
+            "projOcc": model_occ, "actOcc": actual_occ,
+            "occErr": round((model_occ - actual_occ) / actual_occ * 100, 1) if actual_occ else 0,
+            "type": "backtest",
+        })
+
+    # Compute aggregate accuracy metrics — use snapshots if available, fall back to backtest
+    scored = forecast_scorecard if forecast_scorecard else backtest_scorecard
+    if scored:
+        avg_gross_err = sum(abs(s["grossErr"]) for s in scored) / len(scored)
+        avg_adr_err = sum(abs(s["adrErr"]) for s in scored) / len(scored)
+        avg_occ_err = sum(abs(s["occErr"]) for s in scored) / len(scored)
+        gross_bias = sum(s["grossErr"] for s in scored) / len(scored)
         forecast_accuracy = {
-            "scoredMonths": len(forecast_scorecard),
+            "scoredMonths": len(scored),
             "mapeGross": round(avg_gross_err, 1),
             "mapeAdr": round(avg_adr_err, 1),
             "mapeOcc": round(avg_occ_err, 1),
             "biasGross": round(gross_bias, 1),  # positive = over-projecting
-            "details": forecast_scorecard,
+            "details": scored,
+            "backtestDetails": backtest_scorecard,  # always include backtest
+            "snapshotDetails": forecast_scorecard,  # empty until snapshots score
+            "source": "snapshot" if forecast_scorecard else "backtest",
         }
     else:
         forecast_accuracy = {
             "scoredMonths": 0,
             "mapeGross": None, "mapeAdr": None, "mapeOcc": None,
-            "biasGross": None, "details": [],
+            "biasGross": None, "details": [], "backtestDetails": [],
+            "snapshotDetails": [], "source": None,
         }
 
     # Save current projections as the new snapshot for future scoring.
-    # Only save months that are currently projected (not actual/booked) so we
-    # don't overwrite a prior projection with an actual value.
+    # IMPORTANT: Only save the FIRST projection for each month — never overwrite.
+    # This ensures we score the model's original call, not a revised one that had
+    # the benefit of more data. This is what makes the feedback loop honest.
     build_date = today.isoformat()
     for entry in pf_monthly:
         name = entry["month"]
-        if entry["source"] == "projected":
+        if entry["source"] == "projected" and name not in forecast_history:
             forecast_history[name] = {
                 "gross": entry["gross"], "adr": entry["adr"],
                 "occ": entry["occ"], "opex": entry["opex"],
@@ -657,6 +692,16 @@ def compute(bookings, expenses):
                 "bookings": entry["bookings"],
                 "forecastDate": build_date,
             }
+    # Also track the latest projection separately so dashboard can show drift
+    latest_projections = {}
+    for entry in pf_monthly:
+        name = entry["month"]
+        if entry["source"] == "projected":
+            latest_projections[name] = {
+                "gross": entry["gross"], "adr": entry["adr"],
+                "occ": entry["occ"], "forecastDate": build_date,
+            }
+    forecast_history["_latest"] = latest_projections
 
     # Persist the forecast history
     with open(FORECAST_HISTORY, "w") as fh:
