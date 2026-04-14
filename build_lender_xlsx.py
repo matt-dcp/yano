@@ -442,129 +442,7 @@ ws3.freeze_panes = "A5"
 
 
 # ════════════════════════════════════════════════════════
-# TAB 4: QBO Balance Sheet
-# ════════════════════════════════════════════════════════
-ws4 = wb.create_sheet("QBO Balance Sheet")
-ws4.sheet_properties.tabColor = "1565C0"
-ws4.column_dimensions["A"].width = 40
-ws4.column_dimensions["B"].width = 20
-ws4.column_dimensions["C"].width = 20
-
-r = 1
-ws4.cell(r, 1, "DCP Wealth Fund, LLC — Yanonali").font = TITLE_FONT
-ws4.merge_cells("A1:C1")
-r = 2
-ws4.cell(r, 1, "Balance Sheet as of April 14, 2026  |  Cash Basis").font = Font(name="Arial", size=11, color="666666")
-ws4.merge_cells("A2:C2")
-r = 3
-ws4.cell(r, 1, "Source: QuickBooks Online, exported April 14, 2026").font = NOTE_FONT
-ws4.merge_cells("A3:C3")
-
-r = 5
-hdr_row(ws4, r, 2)
-ws4.cell(r, 1, "").font = HEADER_FONT
-ws4.cell(r, 2, "Amount").font = HEADER_FONT
-r += 1
-
-# ASSETS
-ws4.cell(r, 1, "ASSETS").font = BOLD
-for c in range(1, 3): ws4.cell(r, c).fill = LIGHT_GRAY
-r += 1
-r = write_item(ws4, r, "Current Assets — Bank Accounts", 1457, MONEY)
-
-r += 1
-ws4.cell(r, 1, "Fixed Assets").font = BOLD
-r += 1
-fixed_lines = [
-    ("Land", 596847.33), ("Buildings", 1890016.53),
-    ("Acquisition Fee", 49500), ("Fundraising Fee", 11250), ("Cost Segregation", 5920),
-    ("Furniture & Fixtures", 73760.68), ("Appliances", 1810.81),
-    ("Landscaping", 821.86), ("Photography", 2175),
-]
-fa_start = r
-for label, val in fixed_lines:
-    r = write_item(ws4, r, label, round(val), MONEY, indent=True)
-
-# Rehab costs
-ws4.cell(r, 1, "  Rehab Costs — Hard").font = BOLD
-ws4.cell(r, 2, round(QBO_BS_2026["fixed_assets"]["rehab_hard"])).number_format = MONEY
-ws4.cell(r, 2).font = BOLD
-ws4.cell(r, 1).border = THIN_B
-ws4.cell(r, 2).border = THIN_B
-r += 1
-rehab_hard_detail = [
-    ("    General Hard Costs", 201886.43), ("    Contractors/Labor", 1026420.32), ("    Materials", 177337.62),
-]
-for label, val in rehab_hard_detail:
-    ws4.cell(r, 1, label).font = NOTE_FONT
-    ws4.cell(r, 2, round(val)).number_format = MONEY
-    ws4.cell(r, 2).font = NOTE_FONT
-    ws4.cell(r, 1).border = THIN_B
-    ws4.cell(r, 2).border = THIN_B
-    r += 1
-
-ws4.cell(r, 1, "  Rehab Costs — Soft").font = BOLD
-ws4.cell(r, 2, round(QBO_BS_2026["fixed_assets"]["rehab_soft"])).number_format = MONEY
-ws4.cell(r, 2).font = BOLD
-ws4.cell(r, 1).border = THIN_B
-ws4.cell(r, 2).border = THIN_B
-r += 1
-rehab_soft_detail = [
-    ("    Architectural/Planning", 25391.16), ("    Inspection Fees", 4135),
-    ("    Legal & Professional", 1725), ("    Permit Fees", 16663.46),
-    ("    Rehab Management", 59884.49), ("    Survey", 895), ("    Tenant Relocation", 51150),
-]
-for label, val in rehab_soft_detail:
-    ws4.cell(r, 1, label).font = NOTE_FONT
-    ws4.cell(r, 2, round(val)).number_format = MONEY
-    ws4.cell(r, 2).font = NOTE_FONT
-    ws4.cell(r, 1).border = THIN_B
-    ws4.cell(r, 2).border = THIN_B
-    r += 1
-
-# Total fixed
-ws4.cell(r, 1, "Total Fixed Assets").font = Font(name="Arial", bold=True, size=11, color="2D2D2D")
-ws4.cell(r, 2, round(QBO_BS_2026["fixed_assets"]["total"])).number_format = MONEY
-ws4.cell(r, 2).font = Font(name="Arial", bold=True, size=11, color="2D2D2D")
-for c in range(1, 3): ws4.cell(r, c).border = THICK_B
-r += 1
-
-# Total assets
-ws4.cell(r, 1, "TOTAL ASSETS").font = Font(name="Arial", bold=True, size=12, color="2D2D2D")
-ws4.cell(r, 2, round(QBO_BS_2026["total_assets"])).number_format = MONEY
-ws4.cell(r, 2).font = Font(name="Arial", bold=True, size=12, color="2D2D2D")
-for c in range(1, 3): ws4.cell(r, c).fill = LIGHT_GOLD
-r += 2
-
-# LIABILITIES
-ws4.cell(r, 1, "LIABILITIES").font = BOLD
-for c in range(1, 3): ws4.cell(r, c).fill = LIGHT_GRAY
-r += 1
-r = write_item(ws4, r, "Current Liabilities", round(QBO_BS_2026["current_liab"]), MONEY, indent=True)
-ws4.cell(r, 1, "Long-term Liabilities").font = BOLD
-r += 1
-r = write_item(ws4, r, "CDRBC, LLC", 1000000, MONEY, indent=True)
-r = write_item(ws4, r, "GFT IRA, LLC", 500000, MONEY, indent=True)
-r = write_item(ws4, r, "Total Long-term Debt", 1500000, MONEY, bold=True)
-ws4.cell(r, 1, "TOTAL LIABILITIES").font = Font(name="Arial", bold=True, size=11, color="2D2D2D")
-ws4.cell(r, 2, round(QBO_BS_2026["total_liab"])).number_format = MONEY
-ws4.cell(r, 2).font = Font(name="Arial", bold=True, size=11, color="2D2D2D")
-for c in range(1, 3): ws4.cell(r, c).border = THICK_B
-r += 2
-
-# EQUITY
-ws4.cell(r, 1, "EQUITY").font = BOLD
-for c in range(1, 3): ws4.cell(r, c).fill = LIGHT_GRAY
-r += 1
-r = write_item(ws4, r, "Retained Earnings", round(QBO_BS_2026["retained_earnings"]), MONEY)
-r = write_item(ws4, r, "Net Income (YTD 2026)", round(QBO_BS_2026["net_income_ytd"]), MONEY)
-r = write_item(ws4, r, "Total Equity", round(QBO_BS_2026["total_equity"]), MONEY, bold=True)
-
-ws4.freeze_panes = "A5"
-
-
-# ════════════════════════════════════════════════════════
-# TAB 5: Operating Detail (PMS data)
+# TAB 4: Operating Detail (PMS data)
 # ════════════════════════════════════════════════════════
 ws5 = wb.create_sheet("Operating Detail")
 ws5.sheet_properties.tabColor = "C5A55A"
@@ -637,7 +515,7 @@ ws5.freeze_panes = "B6"
 
 
 # ════════════════════════════════════════════════════════
-# TAB 6: Forward Bookings
+# TAB 5: Forward Bookings
 # ════════════════════════════════════════════════════════
 ws6 = wb.create_sheet("Forward Bookings")
 ws6.sheet_properties.tabColor = "2196F3"
@@ -693,7 +571,7 @@ ws6.freeze_panes = "A5"
 
 
 # ════════════════════════════════════════════════════════
-# TAB 7: Pro Forma
+# TAB 6: Pro Forma
 # ════════════════════════════════════════════════════════
 ws7 = wb.create_sheet("Pro Forma")
 ws7.sheet_properties.tabColor = "7B1FA2"
