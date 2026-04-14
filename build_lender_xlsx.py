@@ -642,14 +642,25 @@ for label, val, fmt in inputs:
     r = write_item(ws7, r, label, val, fmt)
 
 r += 1
-ws7.cell(r, 1, "Methodology: Actual monthly ADR and occupancy are divided by their seasonal index to").font = NOTE_FONT
-ws7.merge_cells(f"A{r}:C{r}")
+ws7.cell(r, 1, "METHODOLOGY").font = SECTION_FONT
+ws7.cell(r, 1).border = THICK_B
+ws7.cell(r, 2).border = THICK_B
+ws7.cell(r, 3).border = THICK_B
 r += 1
-ws7.cell(r, 1, "strip out seasonality, revealing baseline performance. Forward months multiply this baseline").font = NOTE_FONT
+methodology = (
+    "Pro forma projections blend closed-month actuals (sourced from PMS booking data and "
+    "QuickBooks) with a seasonal model for future months. The seasonal model de-seasonalizes "
+    "actual ADR and occupancy performance to establish a baseline, then applies monthly seasonal "
+    "indices derived from Santa Barbara STR demand patterns to project forward revenue. Operating "
+    "expenses are projected from trailing actuals, with cleaning costs scaled per turnover and "
+    "fixed costs (management, property tax, insurance) carried at known annual amounts. The model "
+    "recalibrates automatically as each month closes, incorporating new actuals into the baseline "
+    "\u2014 meaning projections tighten over time as operating history grows."
+)
+ws7.cell(r, 1, methodology).font = BODY
+ws7.cell(r, 1).alignment = Alignment(wrap_text=True, vertical="top")
 ws7.merge_cells(f"A{r}:C{r}")
-r += 1
-ws7.cell(r, 1, "by the appropriate seasonal index. The model improves with every data upload.").font = NOTE_FONT
-ws7.merge_cells(f"A{r}:C{r}")
+ws7.row_dimensions[r].height = 90
 
 ws7.freeze_panes = "A5"
 
