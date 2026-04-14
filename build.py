@@ -804,11 +804,20 @@ def compute(bookings, expenses):
 
         if status in ("current", "future"):
             pace_pct = round(booked_gross / pf_gross_mo * 100, 1) if pf_gross_mo and booked_gross else 0
+            mn = i + 1
+            avail_nights = NUM_UNITS * calendar.monthrange(2026, mn)[1]
+            booked_nights = booked["nights"] if booked else 0
+            booked_adr = round(booked_gross / booked_nights) if booked_nights else 0
+            booked_revpar = round(booked_gross / avail_nights) if avail_nights else 0
             forward_pace.append({
                 "month": name,
                 "pfGross": pf_gross_mo,
                 "bookedGross": round(booked_gross),
                 "pacePct": pace_pct,
+                "bookedAdr": booked_adr,
+                "bookedRevpar": booked_revpar,
+                "bookedNights": booked_nights,
+                "availNights": avail_nights,
             })
 
     # Blended forecast = the dynamic pro forma itself (actuals + projections)

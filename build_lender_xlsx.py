@@ -520,20 +520,20 @@ ws5.freeze_panes = "B6"
 ws6 = wb.create_sheet("Forward Bookings")
 ws6.sheet_properties.tabColor = "2196F3"
 ws6.column_dimensions["A"].width = 14
-for c in range(2, 7): ws6.column_dimensions[get_column_letter(c)].width = 18
+for c in range(2, 9): ws6.column_dimensions[get_column_letter(c)].width = 16
 
 r = 1
 ws6.cell(r, 1, "Casa Yano — Forward Bookings on the Books").font = TITLE_FONT
-ws6.merge_cells("A1:F1")
+ws6.merge_cells("A1:H1")
 r = 2
 ws6.cell(r, 1, f"As of {D['generatedAt'][:10]}. Confirmed reservations with deposits received.").font = NOTE_FONT
-ws6.merge_cells("A2:F2")
+ws6.merge_cells("A2:H2")
 r = 4
 
-headers = ["Month", "PF Target", "Booked Revenue", "% of Target", "Remaining", "Status"]
+headers = ["Month", "PF Target", "Booked Revenue", "% of Target", "ADR", "RevPAR", "Remaining", "Status"]
 for i, h in enumerate(headers):
     ws6.cell(r, i+1, h)
-hdr_row(ws6, r, 6)
+hdr_row(ws6, r, 8)
 r += 1
 
 fwd_start = r
@@ -545,18 +545,23 @@ for f in fwd:
     ws6.cell(r, 3).font = BOLD
     ws6.cell(r, 4, f["pacePct"] / 100).number_format = PCT
     ws6.cell(r, 4).font = BOLD
-    ws6.cell(r, 5, max(0, f["pfGross"] - f["bookedGross"])).number_format = MONEY
+    ws6.cell(r, 5, f["bookedAdr"] if f["bookedAdr"] else "—").number_format = MONEY if f["bookedAdr"] else "@"
     ws6.cell(r, 5).font = BODY
+    ws6.cell(r, 6, f["bookedRevpar"] if f["bookedRevpar"] else "—").number_format = MONEY if f["bookedRevpar"] else "@"
+    ws6.cell(r, 6).font = BODY
+    ws6.cell(r, 7, max(0, f["pfGross"] - f["bookedGross"])).number_format = MONEY
+    ws6.cell(r, 7).font = BODY
     status = "Fully Booked" if f["pacePct"] >= 95 else "Strong" if f["pacePct"] >= 60 else "Building" if f["pacePct"] >= 25 else "Early"
-    ws6.cell(r, 6, status).font = BODY
+    ws6.cell(r, 8, status).font = BODY
     if f["pacePct"] >= 60:
-        for c in range(1, 7): ws6.cell(r, c).fill = GREEN_FILL
+        for c in range(1, 9): ws6.cell(r, c).fill = GREEN_FILL
     elif f["pacePct"] >= 25:
-        for c in range(1, 7): ws6.cell(r, c).fill = YELLOW_FILL
+        for c in range(1, 9): ws6.cell(r, c).fill = YELLOW_FILL
     r += 1
 
 # Totals
-for c in range(1, 7): ws6.cell(r, c).border = Border(top=Side(style="medium", color="2D2D2D"))
+num_cols = 8
+for c in range(1, num_cols + 1): ws6.cell(r, c).border = Border(top=Side(style="medium", color="2D2D2D"))
 ws6.cell(r, 1, "TOTAL").font = BOLD
 ws6.cell(r, 2, f"=SUM(B{fwd_start}:B{r-1})").number_format = MONEY
 ws6.cell(r, 2).font = BOLD
@@ -564,8 +569,8 @@ ws6.cell(r, 3, f"=SUM(C{fwd_start}:C{r-1})").number_format = MONEY
 ws6.cell(r, 3).font = BOLD
 ws6.cell(r, 4, f"=C{r}/B{r}").number_format = PCT
 ws6.cell(r, 4).font = BOLD
-ws6.cell(r, 5, f"=B{r}-C{r}").number_format = MONEY
-ws6.cell(r, 5).font = BOLD
+ws6.cell(r, 7, f"=B{r}-C{r}").number_format = MONEY
+ws6.cell(r, 7).font = BOLD
 
 ws6.freeze_panes = "A5"
 
