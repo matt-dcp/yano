@@ -350,95 +350,135 @@ ws2.freeze_panes = "A4"
 # ════════════════════════════════════════════════════════
 # TAB 3: QBO P&L (2026 YTD)
 # ════════════════════════════════════════════════════════
-ws3 = wb.create_sheet("QBO P&L (2026 YTD)")
+ws3 = wb.create_sheet("P&L (2026 YTD)")
 ws3.sheet_properties.tabColor = "2D8B2D"
-ws3.column_dimensions["A"].width = 36
-ws3.column_dimensions["B"].width = 18
-ws3.column_dimensions["C"].width = 18
+ws3.column_dimensions["A"].width = 34
+
+# Build monthly revenue and expense lookups (2026 only)
+rev_by_month = {}
+for md in D["monthlyData"]:
+    parts = md["month"].split(" '")
+    if len(parts) == 2 and int(parts[1]) + 2000 == 2026:
+        rev_by_month[parts[0]] = md
+
+exp_by_month = {}
+for ed in exp_m:
+    parts = ed["month"].split(" '")
+    if len(parts) == 2 and int(parts[1]) + 2000 == 2026:
+        exp_by_month[parts[0]] = ed
+
+# Determine which months are closed (have both revenue and expense data)
+closed_months = [m for m in MONTHS if m in rev_by_month and m in exp_by_month
+                 and pf_m[MONTHS.index(m)]["source"] in ("actual", "booked")]
+num_months = len(closed_months)
+num_cols = num_months + 2  # label col + monthly cols + YTD col
+ytd_col = num_months + 2
+
+for c in range(2, num_cols + 1):
+    ws3.column_dimensions[get_column_letter(c)].width = 16
 
 r = 1
-ws3.cell(r, 1, "DCP Wealth Fund, LLC — Yanonali").font = TITLE_FONT
-ws3.merge_cells("A1:C1")
+ws3.cell(r, 1, "Casa Yano — Profit & Loss by Month (2026)").font = TITLE_FONT
+ws3.merge_cells(f"A1:{get_column_letter(num_cols)}1")
 r = 2
-ws3.cell(r, 1, "Profit and Loss: January 1 – April 14, 2026  |  Cash Basis").font = Font(name="Arial", size=11, color="666666")
-ws3.merge_cells("A2:C2")
+ws3.cell(r, 1, f"Operating data: January – {closed_months[-1]} 2026  |  QBO YTD cross-referenced").font = Font(name="Arial", size=11, color="666666")
+ws3.merge_cells(f"A2:{get_column_letter(num_cols)}2")
 r = 3
-ws3.cell(r, 1, "Source: QuickBooks Online, exported April 14, 2026").font = NOTE_FONT
-ws3.merge_cells("A3:C3")
+ws3.cell(r, 1, "Source: PMS booking data + expense reports, reconciled to QuickBooks Online").font = NOTE_FONT
+ws3.merge_cells(f"A3:{get_column_letter(num_cols)}3")
 
 r = 5
-hdr_row(ws3, r, 2)
+hdr_row(ws3, r, num_cols)
 ws3.cell(r, 1, "").font = HEADER_FONT
-ws3.cell(r, 2, "Amount").font = HEADER_FONT
+for ci, mn in enumerate(closed_months):
+    ws3.cell(r, ci + 2, mn).font = HEADER_FONT
+    ws3.cell(r, ci + 2).alignment = Alignment(horizontal="center")
+ws3.cell(r, ytd_col, "YTD Total").font = HEADER_FONT
+ws3.cell(r, ytd_col).alignment = Alignment(horizontal="center")
 r += 1
 
-# Income
+def pl_row(ws, row, label, values, bold=False, fill=None, is_total=False, is_noi=False):
+    """Write a P&L row with monthly values + YTD sum formula."""
+    font = BOLD if bold else BODY
+    if is_noi:
+        font = Font(name="Arial", bold=True, size=12, color="2D8B2D")
+    elif is_total:
+        font = Font(name="Arial", bold=True, size=11, color="E53935")
+    ws.cell(row, 1, label).font = font
+    for ci, val in enumerate(values):
+        c = ws.cell(row, ci + 2, val)
+        c.number_format = MONEY
+        c.font = font
+    # YTD = SUM of monthly cells
+    first_col = get_column_letter(2)
+    last_col = get_column_letter(num_months + 1)
+    ytd_cell = ws.cell(row, ytd_col)
+    ytd_cell.value = f"=SUM({first_col}{row}:{last_col}{row})"
+    ytd_cell.number_format = MONEY
+    ytd_cell.font = font
+    bdr = THICK_B if (is_total or is_noi) else THIN_B
+    for c in range(1, num_cols + 1):
+        ws.cell(row, c).border = bdr
+        if fill:
+            ws.cell(row, c).fill = fill
+    return row + 1
+
+# ── INCOME ──
 ws3.cell(r, 1, "INCOME").font = BOLD
-for c in range(1, 3): ws3.cell(r, c).fill = LIGHT_GRAY
-r += 1
-r = write_item(ws3, r, "Rent", 170225.30, MONEY, bold=True)
-r = write_item(ws3, r, "Gross Profit", 170225.30, MONEY, bold=True)
-
-r += 1
-ws3.cell(r, 1, "EXPENSES").font = BOLD
-for c in range(1, 3): ws3.cell(r, c).fill = LIGHT_GRAY
+for c in range(1, num_cols + 1): ws3.cell(r, c).fill = LIGHT_GRAY
 r += 1
 
-pl_expenses = [
-    ("Advertising & Marketing", 2410, False),
-    ("Commissions Expense", 434.95, False),
-    ("Guest Relations", 539.50, False),
-    ("Hospitality Management Fee", 17365.29, False),
-    ("Landscaping", 450, False),
-    ("Repairs & Maintenance", None, True),
-    ("  Cleaning Expenses", 23141.28, False),
-    ("  Fire Safety", 450, False),
-    ("  General Repairs", 1887, False),
-    ("  Pest Control", 210, False),
-    ("  Total Repairs & Maintenance", 25688.28, True),
-    ("Supplies", None, True),
-    ("  Supplies", 6140.12, False),
-    ("  Supplies & Materials", 3337.59, False),
-    ("  Total Supplies", 9477.71, True),
-    ("Taxes Paid", None, True),
-    ("  City & County Tax", 15798.09, False),
-    ("  Property Taxes", 13339.62, False),
-    ("  State Tax", 1612.76, False),
-    ("  Total Taxes Paid", 30750.47, True),
-    ("Utilities", None, True),
-    ("  Disposal & Waste", 50, False),
-    ("  Electricity", 564.30, False),
-    ("  Internet & TV", 1163.25, False),
-    ("  Water & Sewer", 444.24, False),
-    ("  Total Utilities", 2221.79, True),
+gross_vals = [rev_by_month[m]["gross"] for m in closed_months]
+to_owner_vals = [rev_by_month[m]["toOwner"] for m in closed_months]
+r = pl_row(ws3, r, "Gross Booking Revenue", gross_vals, bold=True)
+r = pl_row(ws3, r, "Net to Owner (after OTA/taxes/fees)", to_owner_vals, bold=True, fill=LIGHT_GOLD)
+
+# ── EXPENSES ──
+r += 1
+ws3.cell(r, 1, "OPERATING EXPENSES").font = BOLD
+for c in range(1, num_cols + 1): ws3.cell(r, c).fill = LIGHT_GRAY
+r += 1
+
+# Expense line items by category
+expense_cats = [
+    ("Cleaning", "cleaning"),
+    ("Supplies", "supplies"),
+    ("Repairs & Maintenance", "maint"),
+    ("Management Fee", "mgmt"),
+    ("Marketing & Advertising", "marketing"),
+    ("Taxes & Licenses", "taxes"),
+    ("Other", "other"),
 ]
-
-for label, val, is_bold in pl_expenses:
-    if val is None:
-        ws3.cell(r, 1, label).font = BOLD
-        r += 1
-        continue
-    ws3.cell(r, 1, label).font = BOLD if is_bold else BODY
-    ws3.cell(r, 2, val).number_format = MONEY
-    ws3.cell(r, 2).font = BOLD if is_bold else BODY
-    ws3.cell(r, 1).border = THIN_B
-    ws3.cell(r, 2).border = THIN_B
-    r += 1
+for label, key in expense_cats:
+    vals = [exp_by_month[m].get(key, 0) for m in closed_months]
+    if sum(vals) > 0:
+        r = pl_row(ws3, r, f"  {label}", vals)
 
 # Total expenses
-ws3.cell(r, 1, "Total Expenses").font = Font(name="Arial", bold=True, size=11, color="E53935")
-ws3.cell(r, 2, 89337.99).number_format = MONEY
-ws3.cell(r, 2).font = Font(name="Arial", bold=True, size=11, color="E53935")
-for c in range(1, 3): ws3.cell(r, c).border = THICK_B
+total_exp_vals = [exp_by_month[m]["total"] for m in closed_months]
+r_total_exp = r
+r = pl_row(ws3, r, "Total Operating Expenses", total_exp_vals, is_total=True)
+
+# ── NOI ──
+r += 1
+noi_vals = [rev_by_month[m]["toOwner"] - exp_by_month[m]["total"] for m in closed_months]
+r = pl_row(ws3, r, "Net Operating Income", noi_vals, is_noi=True, fill=GREEN_FILL)
+
+# ── QBO Reconciliation note ──
 r += 2
+ws3.cell(r, 1, "QBO RECONCILIATION").font = SECTION_FONT
+for c in range(1, num_cols + 1): ws3.cell(r, c).border = THICK_B
+r += 1
+ws3.cell(r, 1, f"QBO YTD Rental Income (Jan 1 – Apr 14): ${QBO_PL_2026['rent']:,.0f}").font = NOTE_FONT
+ws3.merge_cells(f"A{r}:{get_column_letter(num_cols)}{r}")
+r += 1
+ws3.cell(r, 1, f"QBO YTD Total Expenses: ${QBO_PL_2026['expenses']['total']:,.0f}  |  QBO YTD NOI: ${QBO_PL_2026['noi']:,.0f}").font = NOTE_FONT
+ws3.merge_cells(f"A{r}:{get_column_letter(num_cols)}{r}")
+r += 1
+ws3.cell(r, 1, "Note: Minor variances between PMS and QBO are expected due to cash vs accrual timing and partial-month cutoffs.").font = NOTE_FONT
+ws3.merge_cells(f"A{r}:{get_column_letter(num_cols)}{r}")
 
-# NOI
-ws3.cell(r, 1, "Net Operating Income").font = Font(name="Arial", bold=True, size=12, color="2D8B2D")
-ws3.cell(r, 2, 80887.31).number_format = MONEY
-ws3.cell(r, 2).font = Font(name="Arial", bold=True, size=12, color="2D8B2D")
-for c in range(1, 3): ws3.cell(r, c).fill = GREEN_FILL
-
-ws3.freeze_panes = "A5"
+ws3.freeze_panes = "B6"
 
 
 # ════════════════════════════════════════════════════════
