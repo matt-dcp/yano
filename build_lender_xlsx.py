@@ -128,7 +128,7 @@ ws1.column_dimensions["D"].width = 30
 ws1.column_dimensions["E"].width = 22
 
 r = 1
-ws1.cell(r, 1, "Casa Yano — Lender Package").font = Font(name="Arial", bold=True, size=18, color="2D2D2D")
+ws1.cell(r, 1, "Casa Yano - Lender Package").font = Font(name="Arial", bold=True, size=18, color="2D2D2D")
 ws1.merge_cells("A1:E1")
 r = 2
 ws1.cell(r, 1, "210 W Yanonali St, Santa Barbara, CA 93101").font = Font(name="Arial", size=11, color="666666")
@@ -152,7 +152,7 @@ for label, val in props:
 
 r += 1
 r_ytd_start = r
-r = section_hdr(ws1, r, "YTD PERFORMANCE (QBO — Cash Basis)")
+r = section_hdr(ws1, r, "YTD PERFORMANCE (QBO - Cash Basis)")
 section_hdr(ws1, r_ytd_start, "FULL-YEAR PRO FORMA", cols=2)
 ws1.cell(r_ytd_start, 4, "FULL-YEAR PRO FORMA").font = SECTION_FONT
 ws1.cell(r_ytd_start, 4).border = THICK_B
@@ -188,10 +188,10 @@ r = max(r_ytd_end, r) + 1
 r = section_hdr(ws1, r, "KEY HIGHLIGHTS", cols=5)
 highlights = [
     f"Total project basis: ${QBO_BS_2026['fixed_assets']['total']:,.0f} (per QBO balance sheet)",
-    f"Existing debt: ${QBO_BS_2026['lt_debt']['total']:,.0f} — seeking refinance",
-    f"Occupancy trending from 75% (Jan) to 88% (Mar) — strong ramp trajectory",
-    f"April booked at ${pf_m[3]['gross']:,} gross — highest month to date",
-    f"Owner margin of {D['summary']['ownerMargin']}% — efficient operations with low OTA commission rates",
+    f"Existing debt: ${QBO_BS_2026['lt_debt']['total']:,.0f} - seeking refinance",
+    f"Occupancy trending from 75% (Jan) to 88% (Mar) - strong ramp trajectory",
+    f"April booked at ${pf_m[3]['gross']:,} gross - highest month to date",
+    f"Owner margin of {D['summary']['ownerMargin']}% - efficient operations with low OTA commission rates",
     f"QBO YTD NOI of ${QBO_PL_2026['noi']:,.0f} in first 3.5 months of operations",
 ]
 for h in highlights:
@@ -214,7 +214,7 @@ ws2.column_dimensions["D"].width = 32
 ws2.column_dimensions["E"].width = 22
 
 r = 1
-ws2.cell(r, 1, "Casa Yano — Project History & Renovation").font = Font(name="Arial", bold=True, size=18, color="2D2D2D")
+ws2.cell(r, 1, "Casa Yano - Project History & Renovation").font = Font(name="Arial", bold=True, size=18, color="2D2D2D")
 ws2.merge_cells("A1:E1")
 r = 2
 ws2.cell(r, 1, "Source: QuickBooks Online balance sheet + project records").font = NOTE_FONT
@@ -264,8 +264,8 @@ cost_start = r
 cost_items = [
     ("Land", round(QBO_BS_2026["fixed_assets"]["land"]), MONEY),
     ("Buildings", round(QBO_BS_2026["fixed_assets"]["buildings"]), MONEY),
-    ("Rehab Costs — Hard", round(QBO_BS_2026["fixed_assets"]["rehab_hard"]), MONEY),
-    ("Rehab Costs — Soft", round(QBO_BS_2026["fixed_assets"]["rehab_soft"]), MONEY),
+    ("Rehab Costs - Hard", round(QBO_BS_2026["fixed_assets"]["rehab_hard"]), MONEY),
+    ("Rehab Costs - Soft", round(QBO_BS_2026["fixed_assets"]["rehab_soft"]), MONEY),
     ("FF&E / Furniture & Fixtures", round(QBO_BS_2026["fixed_assets"]["ff_e"]), MONEY),
     ("Other (Acq Fee, Fundraising, Cost Seg, etc.)", round(49500 + 11250 + 5920 + 1810.81 + 821.86 + 2175), MONEY),
 ]
@@ -330,10 +330,10 @@ r = section_hdr(ws2, r, "TIMELINE", cols=5)
 timeline = [
     ("Mar 2024", "Property acquired"),
     ("Mar – Sep 2024", "Planning, permitting, design"),
-    ("Oct 2024", "Construction begins — full gut renovation"),
-    ("Nov 2025", "Construction complete — certificate of occupancy"),
-    ("Dec 18, 2025", "First guest booking — STR operations commence"),
-    ("Jan – Mar 2026", "First full quarter of operations — strong ramp"),
+    ("Oct 2024", "Construction begins - full gut renovation"),
+    ("Nov 2025", "Construction complete - certificate of occupancy"),
+    ("Dec 18, 2025", "First guest booking - STR operations commence"),
+    ("Jan – Mar 2026", "First full quarter of operations - strong ramp"),
     ("Apr 2026", "Highest-grossing month to date"),
 ]
 for date, event in timeline:
@@ -378,7 +378,7 @@ for c in range(2, num_cols + 1):
     ws3.column_dimensions[get_column_letter(c)].width = 16
 
 r = 1
-ws3.cell(r, 1, "Casa Yano — Profit & Loss by Month (2026)").font = TITLE_FONT
+ws3.cell(r, 1, "Casa Yano - Profit & Loss by Month (2026)").font = TITLE_FONT
 ws3.merge_cells(f"A1:{get_column_letter(num_cols)}1")
 r = 2
 ws3.cell(r, 1, f"Operating data: January – {closed_months[-1]} 2026  |  QBO YTD cross-referenced").font = Font(name="Arial", size=11, color="666666")
@@ -490,7 +490,7 @@ ws5.column_dimensions["A"].width = 22
 for c in range(2, 16): ws5.column_dimensions[get_column_letter(c)].width = 12
 
 r = 1
-ws5.cell(r, 1, "Casa Yano — Monthly Operating Detail (2026)").font = TITLE_FONT
+ws5.cell(r, 1, "Casa Yano - Monthly Operating Detail (2026)").font = TITLE_FONT
 ws5.merge_cells("A1:M1")
 r = 2
 ws5.cell(r, 1, "Source: Property Management System booking data").font = NOTE_FONT
@@ -563,7 +563,7 @@ ws6.column_dimensions["A"].width = 14
 for c in range(2, 9): ws6.column_dimensions[get_column_letter(c)].width = 16
 
 r = 1
-ws6.cell(r, 1, "Casa Yano — Forward Bookings on the Books").font = TITLE_FONT
+ws6.cell(r, 1, "Casa Yano - Forward Bookings on the Books").font = TITLE_FONT
 ws6.merge_cells("A1:H1")
 r = 2
 ws6.cell(r, 1, f"As of {D['generatedAt'][:10]}. Confirmed reservations with deposits received.").font = NOTE_FONT
@@ -585,9 +585,9 @@ for f in fwd:
     ws6.cell(r, 3).font = BOLD
     ws6.cell(r, 4, f["pacePct"] / 100).number_format = PCT
     ws6.cell(r, 4).font = BOLD
-    ws6.cell(r, 5, f["bookedAdr"] if f["bookedAdr"] else "—").number_format = MONEY if f["bookedAdr"] else "@"
+    ws6.cell(r, 5, f["bookedAdr"] if f["bookedAdr"] else "-").number_format = MONEY if f["bookedAdr"] else "@"
     ws6.cell(r, 5).font = BODY
-    ws6.cell(r, 6, f["bookedRevpar"] if f["bookedRevpar"] else "—").number_format = MONEY if f["bookedRevpar"] else "@"
+    ws6.cell(r, 6, f["bookedRevpar"] if f["bookedRevpar"] else "-").number_format = MONEY if f["bookedRevpar"] else "@"
     ws6.cell(r, 6).font = BODY
     ws6.cell(r, 7, max(0, f["pfGross"] - f["bookedGross"])).number_format = MONEY
     ws6.cell(r, 7).font = BODY
@@ -625,7 +625,7 @@ ws7.column_dimensions["B"].width = 18
 ws7.column_dimensions["C"].width = 14
 
 r = 1
-ws7.cell(r, 1, "Casa Yano — 2026 Pro Forma (Blended Forecast)").font = TITLE_FONT
+ws7.cell(r, 1, "Casa Yano - 2026 Pro Forma (Blended Forecast)").font = TITLE_FONT
 ws7.merge_cells("A1:C1")
 r = 2
 ws7.cell(r, 1, f"Blends {PF['closedMonths']} months of closed actuals with seasonal projections calibrated from actual performance").font = NOTE_FONT
@@ -700,7 +700,7 @@ methodology = (
     "expenses are projected from trailing actuals, with cleaning costs scaled per turnover and "
     "fixed costs (management, property tax, insurance) carried at known annual amounts. The model "
     "recalibrates automatically as each month closes, incorporating new actuals into the baseline "
-    "\u2014 meaning projections tighten over time as operating history grows."
+    "- meaning projections tighten over time as operating history grows."
 )
 ws7.cell(r, 1, methodology).font = BODY
 ws7.cell(r, 1).alignment = Alignment(wrap_text=True, vertical="top")
