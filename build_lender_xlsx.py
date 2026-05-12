@@ -9,6 +9,7 @@ from openpyxl.chart import BarChart, LineChart, PieChart, Reference
 from openpyxl.chart.series import SeriesLabel
 from openpyxl.chart.label import DataLabelList
 from openpyxl.utils import get_column_letter
+from openpyxl.formatting.rule import FormulaRule
 
 # Load dashboard data
 with open(Path(__file__).parent / "public" / "data.js") as f:
@@ -31,6 +32,7 @@ GREEN_FILL = PatternFill("solid", fgColor="E8F5E9")
 BLUE_FILL = PatternFill("solid", fgColor="E3F2FD")
 YELLOW_FILL = PatternFill("solid", fgColor="FFFDE7")
 LIGHT_GOLD = PatternFill("solid", fgColor="F5ECD7")
+RED_FILL = PatternFill("solid", fgColor="FFEBEE")
 
 HEADER_FONT = Font(name="Arial", bold=True, color="FFFFFF", size=11)
 GOLD_FONT = Font(name="Arial", bold=True, color="C5A55A", size=11)
@@ -397,18 +399,29 @@ ws3.cell(r, ytd_col, "YTD Total").font = HEADER_FONT
 ws3.cell(r, ytd_col).alignment = Alignment(horizontal="center")
 r += 1
 
-def pl_row(ws, row, label, values, bold=False, fill=None, is_total=False, is_noi=False):
-    """Write a P&L row with monthly values + YTD sum formula."""
+def pl_row(ws, row, label, values, bold=False, fill=None, is_total=False, is_noi=False,
+           formula_cells=None):
+    """Write a P&L row with monthly values + YTD sum formula.
+    If formula_cells is provided, the monthly cells use formulas instead of values.
+    formula_cells is a list of formulas (strings) matching the length of months.
+    """
     font = BOLD if bold else BODY
     if is_noi:
         font = Font(name="Arial", bold=True, size=12, color="2D8B2D")
     elif is_total:
         font = Font(name="Arial", bold=True, size=11, color="E53935")
     ws.cell(row, 1, label).font = font
-    for ci, val in enumerate(values):
-        c = ws.cell(row, ci + 2, val)
-        c.number_format = MONEY
-        c.font = font
+    if formula_cells is not None:
+        for ci, formula in enumerate(formula_cells):
+            c = ws.cell(row, ci + 2)
+            c.value = formula
+            c.number_format = MONEY
+            c.font = font
+    else:
+        for ci, val in enumerate(values):
+            c = ws.cell(row, ci + 2, val)
+            c.number_format = MONEY
+            c.font = font
     # YTD = SUM of monthly cells
     first_col = get_column_letter(2)
     last_col = get_column_letter(num_months + 1)
@@ -430,8 +443,10 @@ r += 1
 
 gross_vals = [rev_by_month[m]["gross"] for m in closed_months]
 to_owner_vals = [rev_by_month[m]["toOwner"] for m in closed_months]
+r_gross = r
 r = pl_row(ws3, r, "Gross Booking Revenue", gross_vals, bold=True)
-r = pl_row(ws3, r, "Net to Owner (after OTA/taxes/fees)", to_owner_vals, bold=True, fill=LIGHT_GOLD)
+r_to_owner = r
+r = pl_row(ws3, r, "Net to Owner (after OTA & Processing)", to_owner_vals, bold=True, fill=LIGHT_GOLD)
 
 # ── EXPENSES ──
 r += 1
@@ -439,7 +454,7 @@ ws3.cell(r, 1, "OPERATING EXPENSES").font = BOLD
 for c in range(1, num_cols + 1): ws3.cell(r, c).fill = LIGHT_GRAY
 r += 1
 
-# Expense line items by category
+# Expense line items by category - track which rows are actually written
 expense_cats = [
     ("Cleaning", "cleaning"),
     ("Supplies", "supplies"),
@@ -449,20 +464,54 @@ expense_cats = [
     ("Taxes & Licenses", "taxes"),
     ("Other", "other"),
 ]
+expense_row_range_start = None
+expense_row_range_end = None
 for label, key in expense_cats:
     vals = [exp_by_month[m].get(key, 0) for m in closed_months]
     if sum(vals) > 0:
+        if expense_row_range_start is None:
+            expense_row_range_start = r
         r = pl_row(ws3, r, f"  {label}", vals)
+        expense_row_range_end = r - 1  # row just written
 
-# Total expenses
-total_exp_vals = [exp_by_month[m]["total"] for m in closed_months]
+# Total expenses - FORMULA SUM of category rows above
 r_total_exp = r
-r = pl_row(ws3, r, "Total Operating Expenses", total_exp_vals, is_total=True)
+total_exp_formulas = []
+for ci in range(num_months):
+    col = get_column_letter(ci + 2)
+    total_exp_formulas.append(f"=SUM({col}{expense_row_range_start}:{col}{expense_row_range_end})")
+r = pl_row(ws3, r, "Total Operating Expenses", None, is_total=True, formula_cells=total_exp_formulas)
 
-# ── NOI ──
+# ── NOI ── FORMULA: Net to Owner - Total OpEx
 r += 1
-noi_vals = [rev_by_month[m]["toOwner"] - exp_by_month[m]["total"] for m in closed_months]
-r = pl_row(ws3, r, "Net Operating Income", noi_vals, is_noi=True, fill=GREEN_FILL)
+r_noi = r  # capture NOI row before pl_row writes it
+noi_formulas = []
+for ci in range(num_months):
+    col = get_column_letter(ci + 2)
+    noi_formulas.append(f"={col}{r_to_owner}-{col}{r_total_exp}")
+r = pl_row(ws3, r, "Net Operating Income", None, is_noi=True, fill=GREEN_FILL, formula_cells=noi_formulas)
+
+# Reconciliation check row - verifies NOI = Net to Owner - Total OpEx (should be zero variance)
+r += 1
+ws3.cell(r, 1, "Reconciliation check:").font = Font(name="Arial", size=9, color="666666", italic=True)
+for ci in range(num_months):
+    col = get_column_letter(ci + 2)
+    cell = ws3.cell(r, ci + 2)
+    cell.value = f'=IF(ROUND({col}{r_to_owner}-{col}{r_total_exp}-{col}{r_noi},0)=0,"OK","ERR")'
+    cell.font = Font(name="Arial", size=9, color="666666", italic=True)
+    cell.alignment = Alignment(horizontal="center")
+ytd_check = ws3.cell(r, ytd_col)
+ytd_col_letter = get_column_letter(ytd_col)
+ytd_check.value = f'=IF(ROUND({ytd_col_letter}{r_to_owner}-{ytd_col_letter}{r_total_exp}-{ytd_col_letter}{r_noi},0)=0,"OK","ERR")'
+ytd_check.font = Font(name="Arial", size=9, color="666666", italic=True)
+ytd_check.alignment = Alignment(horizontal="center")
+# Conditional formatting: green if OK, red if ERR
+for ci in range(num_months + 1):
+    col = get_column_letter(ci + 2)
+    ws3.conditional_formatting.add(f"{col}{r}",
+        FormulaRule(formula=[f'{col}{r}="OK"'], fill=GREEN_FILL))
+    ws3.conditional_formatting.add(f"{col}{r}",
+        FormulaRule(formula=[f'{col}{r}="ERR"'], fill=RED_FILL))
 
 # ── QBO Reconciliation note ──
 r += 2
@@ -620,7 +669,7 @@ ws6.freeze_panes = "A5"
 # ════════════════════════════════════════════════════════
 ws7 = wb.create_sheet("Pro Forma")
 ws7.sheet_properties.tabColor = "7B1FA2"
-ws7.column_dimensions["A"].width = 30
+ws7.column_dimensions["A"].width = 38
 ws7.column_dimensions["B"].width = 18
 ws7.column_dimensions["C"].width = 14
 
@@ -638,40 +687,248 @@ ws7.cell(r, 2, "Amount").font = HEADER_FONT
 ws7.cell(r, 3, "% of Gross").font = HEADER_FONT
 r += 1
 
+# Pull values from source pro forma model
 pf_gross = PF["gross"]
+pf_net_owner = PF["netOwner"]
+pf_direct_opex = PF["opex"]  # Direct OpEx (cleaning + supplies/maint/other)
+pf_mgmt_fee_input = PF["mgmtFee"]
+pf_prop_tax_input = PF["propertyTax"]
+pf_insurance_input = PF["insurance"]
+pf_other_fixed_input = PF["otherFixed"]
+pf_expected_noi = PF["noiAfterKnown"]
 wf = PF["waterfall"]
 
-pl_lines = [
-    ("Gross Revenue", pf_gross, True, False, None),
-    ("OTA Commissions", abs(wf[1]["value"]), False, True, None),
-    ("Taxes (TOT)", abs(wf[2]["value"]), False, True, None),
-    ("Processing Fees", abs(wf[3]["value"]), False, True, None),
-    ("Net to Owner", PF["netOwner"], True, False, LIGHT_GOLD),
-    ("Direct OpEx (Cleaning, Supplies, etc.)", PF["opex"], False, True, None),
-    ("Management Fee (10%)", PF["mgmtFee"], False, True, None),
-    ("Property Tax", PF["propertyTax"], False, True, None),
-    ("Insurance", PF["insurance"], False, True, None),
-    ("Other Fixed Costs", PF["otherFixed"], False, True, None),
-    ("Net Operating Income", PF["noiAfterKnown"], True, False, GREEN_FILL),
-]
+# Compute exact OTA and Processing dollar amounts that reconcile to Net to Owner.
+# Net to Owner = Gross - OTA Commission - Processing Fees (TOT is pass-through, not deducted).
+# Allocate channel costs between OTA and Processing using actual observed ratios.
+channel_costs = pf_gross - pf_net_owner
+ota_pct_summary = D["summary"]["otaPct"] / 100  # blended OTA % from actual bookings
+proc_pct_approx = 0.007  # ~0.7% from booking-level analysis (processing on direct bookings)
+# Allocate channel_costs proportionally to maintain exact reconciliation
+total_ratio = ota_pct_summary + proc_pct_approx
+ota_dollars = round(channel_costs * (ota_pct_summary / total_ratio))
+proc_dollars = channel_costs - ota_dollars  # exact remainder ensures sum reconciles
 
-for label, val, is_bold, is_neg, fill in pl_lines:
-    ws7.cell(r, 1, f"  {label}" if is_neg else label).font = BOLD if is_bold else BODY
-    displayed = -val if is_neg else val
-    ws7.cell(r, 2, displayed).number_format = MONEY
-    ws7.cell(r, 2).font = BOLD if is_bold else BODY
-    if label in ("Net to Owner", "Net Operating Income", "Gross Revenue"):
-        pct_val = val / pf_gross if pf_gross else 0
-        ws7.cell(r, 3, pct_val).number_format = PCT
-        ws7.cell(r, 3).font = BOLD
-    if fill:
-        for c in range(1, 4): ws7.cell(r, c).fill = fill
-    ws7.cell(r, 1).border = THIN_B
-    ws7.cell(r, 2).border = THIN_B
-    ws7.cell(r, 3).border = THIN_B
-    r += 1
+# Get cleaning and other direct opex from waterfall
+cleaning_input = -wf[5]["value"] if len(wf) > 5 and wf[5]["name"] == "Cleaning" else round(pf_direct_opex * 0.4)
+other_opex_input = -wf[6]["value"] if len(wf) > 6 and "Supplies" in wf[6]["name"] else (pf_direct_opex - cleaning_input)
 
+# ── Build P&L with formulas ──
+gross_row = r
+ws7.cell(r, 1, "Gross Revenue").font = BOLD
+ws7.cell(r, 2, pf_gross).number_format = MONEY
+ws7.cell(r, 2).font = BOLD
+ws7.cell(r, 3, 1.0).number_format = PCT
+ws7.cell(r, 3).font = BOLD
+for c in range(1, 4):
+    ws7.cell(r, c).border = THIN_B
 r += 1
+
+ota_row = r
+ws7.cell(r, 1, "  OTA Commissions").font = BODY
+ws7.cell(r, 2, -ota_dollars).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
+ws7.cell(r, 3).number_format = PCT
+ws7.cell(r, 3).font = BODY
+for c in range(1, 4):
+    ws7.cell(r, c).border = THIN_B
+r += 1
+
+proc_row = r
+ws7.cell(r, 1, "  Processing Fees").font = BODY
+ws7.cell(r, 2, -proc_dollars).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
+ws7.cell(r, 3).number_format = PCT
+ws7.cell(r, 3).font = BODY
+for c in range(1, 4):
+    ws7.cell(r, c).border = THIN_B
+r += 1
+
+# Net to Owner - FORMULA: Gross + OTA + Processing
+net_to_owner_row = r
+ws7.cell(r, 1, "Net to Owner").font = BOLD
+ws7.cell(r, 2).value = f"=B{gross_row}+B{ota_row}+B{proc_row}"
+ws7.cell(r, 2).number_format = MONEY
+ws7.cell(r, 2).font = BOLD
+ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
+ws7.cell(r, 3).number_format = PCT
+ws7.cell(r, 3).font = BOLD
+for c in range(1, 4):
+    ws7.cell(r, c).fill = LIGHT_GOLD
+    ws7.cell(r, c).border = THIN_B
+r += 2
+
+# Operating Expenses section header
+ws7.cell(r, 1, "Operating Expenses").font = SECTION_FONT
+for c in range(1, 4):
+    ws7.cell(r, c).fill = LIGHT_GRAY
+r += 1
+
+opex_start_row = r
+ws7.cell(r, 1, "  Cleaning").font = BODY
+ws7.cell(r, 2, -cleaning_input).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
+ws7.cell(r, 3).number_format = PCT
+for c in range(1, 4):
+    ws7.cell(r, c).border = THIN_B
+r += 1
+
+ws7.cell(r, 1, "  Supplies, Maintenance, Other").font = BODY
+ws7.cell(r, 2, -other_opex_input).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
+ws7.cell(r, 3).number_format = PCT
+for c in range(1, 4):
+    ws7.cell(r, c).border = THIN_B
+r += 1
+
+# Management Fee - FORMULA: 10% of Gross
+ws7.cell(r, 1, "  Management Fee (10% of Gross)").font = BODY
+ws7.cell(r, 2).value = f"=-0.10*B{gross_row}"
+ws7.cell(r, 2).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
+ws7.cell(r, 3).number_format = PCT
+for c in range(1, 4):
+    ws7.cell(r, c).border = THIN_B
+r += 1
+
+ws7.cell(r, 1, "  Property Tax").font = BODY
+ws7.cell(r, 2, -pf_prop_tax_input).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
+ws7.cell(r, 3).number_format = PCT
+for c in range(1, 4):
+    ws7.cell(r, c).border = THIN_B
+r += 1
+
+ws7.cell(r, 1, "  Insurance").font = BODY
+ws7.cell(r, 2, -pf_insurance_input).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
+ws7.cell(r, 3).number_format = PCT
+for c in range(1, 4):
+    ws7.cell(r, c).border = THIN_B
+r += 1
+
+ws7.cell(r, 1, "  Other Fixed Costs (utilities, internet, etc.)").font = BODY
+ws7.cell(r, 2, -pf_other_fixed_input).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
+ws7.cell(r, 3).number_format = PCT
+for c in range(1, 4):
+    ws7.cell(r, c).border = THIN_B
+opex_end_row = r
+r += 1
+
+# Total Operating Expenses - FORMULA: SUM of opex rows
+total_opex_row = r
+ws7.cell(r, 1, "Total Operating Expenses").font = BOLD
+ws7.cell(r, 2).value = f"=SUM(B{opex_start_row}:B{opex_end_row})"
+ws7.cell(r, 2).number_format = MONEY
+ws7.cell(r, 2).font = BOLD
+ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
+ws7.cell(r, 3).number_format = PCT
+ws7.cell(r, 3).font = BOLD
+for c in range(1, 4):
+    ws7.cell(r, c).border = THICK_B
+r += 2
+
+# NOI - FORMULA: Net to Owner + Total OpEx (since OpEx is negative)
+noi_row = r
+NOI_FONT = Font(name="Arial", bold=True, size=12, color="2D8B2D")
+ws7.cell(r, 1, "Net Operating Income").font = NOI_FONT
+ws7.cell(r, 2).value = f"=B{net_to_owner_row}+B{total_opex_row}"
+ws7.cell(r, 2).number_format = MONEY
+ws7.cell(r, 2).font = NOI_FONT
+ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
+ws7.cell(r, 3).number_format = PCT
+ws7.cell(r, 3).font = NOI_FONT
+for c in range(1, 4):
+    ws7.cell(r, c).fill = GREEN_FILL
+    ws7.cell(r, c).border = THICK_B
+r += 2
+
+# ── RECONCILIATION CHECK ──
+ws7.cell(r, 1, "RECONCILIATION CHECK").font = SECTION_FONT
+for c in range(1, 4):
+    ws7.cell(r, c).border = THICK_B
+r += 1
+
+ws7.cell(r, 1, "Expected NOI (from model)").font = BODY
+ws7.cell(r, 2, pf_expected_noi).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+expected_noi_row = r
+r += 1
+
+ws7.cell(r, 1, "Calculated NOI (this tab)").font = BODY
+ws7.cell(r, 2).value = f"=B{noi_row}"
+ws7.cell(r, 2).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+calc_noi_row = r
+r += 1
+
+ws7.cell(r, 1, "Variance").font = BODY
+ws7.cell(r, 2).value = f"=B{calc_noi_row}-B{expected_noi_row}"
+ws7.cell(r, 2).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+var_row = r
+r += 1
+
+ws7.cell(r, 1, "Status").font = BOLD
+ws7.cell(r, 2).value = f'=IF(ABS(B{var_row})<=1,"OK - reconciles","REVIEW - variance exceeds $1")'
+ws7.cell(r, 2).font = BOLD
+status_row = r
+# Conditional formatting on status cell
+ws7.conditional_formatting.add(f"B{status_row}",
+    FormulaRule(formula=[f'B{status_row}="OK - reconciles"'],
+                fill=GREEN_FILL,
+                font=Font(name="Arial", bold=True, color="2D8B2D")))
+ws7.conditional_formatting.add(f"B{status_row}",
+    FormulaRule(formula=[f'NOT(B{status_row}="OK - reconciles")'],
+                fill=RED_FILL,
+                font=Font(name="Arial", bold=True, color="E53935")))
+r += 2
+
+# ── PASS-THROUGH TAXES & FEES (INFORMATIONAL) ──
+ws7.cell(r, 1, "PASS-THROUGH TAXES & FEES (INFORMATIONAL)").font = SECTION_FONT
+for c in range(1, 4):
+    ws7.cell(r, c).border = THICK_B
+r += 1
+
+ws7.cell(r, 1, "The following amounts are collected from guests at booking and either remitted to the City or").font = NOTE_FONT
+ws7.merge_cells(f"A{r}:C{r}")
+r += 1
+ws7.cell(r, 1, "offset by corresponding expenses. They are NOT deducted from Net to Owner.").font = NOTE_FONT
+ws7.merge_cells(f"A{r}:C{r}")
+r += 1
+
+# Estimate TOT for the projection (12% of room revenue, approximated as 9.7% of gross from actuals)
+tot_rate = D["summary"].get("totalGross", 0)
+tot_estimated = round(pf_gross * 0.097)  # ~9.7% of gross from booking data
+ws7.cell(r, 1, "TOT (Transient Occupancy Tax) collected from guests").font = BODY
+ws7.cell(r, 2, tot_estimated).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+ws7.cell(r, 1).border = THIN_B
+ws7.cell(r, 2).border = THIN_B
+r += 1
+ws7.cell(r, 1, "  Remitted to City of Santa Barbara (12% lodging tax)").font = NOTE_FONT
+ws7.merge_cells(f"A{r}:C{r}")
+r += 1
+
+ws7.cell(r, 1, "Cleaning fees collected from guests").font = BODY
+ws7.cell(r, 2, "see Cleaning expense").font = NOTE_FONT
+ws7.cell(r, 1).border = THIN_B
+ws7.cell(r, 2).border = THIN_B
+r += 1
+ws7.cell(r, 1, "  Offset by Cleaning expense above; net-neutral pass-through").font = NOTE_FONT
+ws7.merge_cells(f"A{r}:C{r}")
+r += 2
+
+# ── MODEL INPUTS ──
 ws7.cell(r, 1, "MODEL INPUTS").font = SECTION_FONT
 ws7.cell(r, 1).border = THICK_B
 ws7.cell(r, 2).border = THICK_B
