@@ -77,7 +77,10 @@ def section_hdr(ws, row, title, cols=2):
     for c in range(1, cols+1): ws.cell(row, c).border = THICK_B
     return row + 1
 
-# QBO data (hardcoded from extracted financials)
+# QBO data (hardcoded from extracted financials - updated June 4, 2026 for period through May 31, 2026)
+QBO_AS_OF_DATE = "May 31, 2026"
+QBO_PERIOD = "January 1 - May 31, 2026"
+
 QBO_BS_2026 = {
     "cash": 1457,
     "fixed_assets": {
@@ -92,28 +95,29 @@ QBO_BS_2026 = {
     "lt_debt": {"cdrbc": 1000000, "gft_ira": 500000, "total": 1500000},
     "total_liab": 1502063.95,
     "retained_earnings": -343121.08,
-    "net_income_ytd": 9280.01,
-    "total_equity": -333841.07,
+    "net_income_ytd": 72502.37,
+    "total_equity": -270618.71,
 }
 
 QBO_PL_2026 = {
-    "rent": 170225.30,
+    "rent": 273154.41,
     "expenses": {
-        "advertising": 2410, "commissions": 434.95, "guest_relations": 539.50,
-        "mgmt_fee": 17365.29, "landscaping": 450,
-        "cleaning": 23141.28, "fire_safety": 450, "general_repairs": 1887, "pest_control": 210,
-        "repairs_total": 25688.28,
-        "supplies": 9477.71,
-        "city_county_tax": 15798.09, "property_tax": 13339.62, "state_tax": 1612.76,
-        "taxes_total": 30750.47,
-        "disposal": 50, "electricity": 564.30, "internet": 1163.25, "water": 444.24,
-        "utilities_total": 2221.79,
-        "total": 89337.99,
+        "advertising": 2984.60, "commissions": 434.95, "guest_relations": 539.50,
+        "mgmt_fee": 27785.93, "landscaping": 450,
+        "cleaning": 35576.28, "fire_safety": 450, "general_repairs": 4309.90, "pest_control": 210,
+        "disposal": 50,
+        "repairs_total": 40596.18,
+        "supplies": 11090.99,
+        "city_county_tax": 25418.29, "property_tax": 13339.62, "state_tax": 1612.76,
+        "taxes_total": 40370.67,
+        "electricity": 302.01, "gas": 329.37, "internet": 1395.90, "water": 2764.64,
+        "utilities_total": 4791.92,
+        "total": 129044.74,
     },
-    "noi": 80887.31,
+    "noi": 144109.67,
     "bank_charges": 357.30,
     "mortgage_interest": 71250,
-    "net_income": 9280.01,
+    "net_income": 72502.37,
 }
 
 
@@ -161,7 +165,7 @@ ws1.cell(r_ytd_start, 4).border = THICK_B
 ws1.cell(r_ytd_start, 5).border = THICK_B
 
 ytd_items = [
-    ("Period", "Jan 1 – Apr 14, 2026", None),
+    ("Period", "Jan 1 – May 31, 2026", None),
     ("Rental Income", QBO_PL_2026["rent"], MONEY),
     ("Total Operating Expenses", QBO_PL_2026["expenses"]["total"], MONEY),
     ("Net Operating Income", QBO_PL_2026["noi"], MONEY),
@@ -188,13 +192,30 @@ for label, val, fmt in pf_items:
 
 r = max(r_ytd_end, r) + 1
 r = section_hdr(ws1, r, "KEY HIGHLIGHTS", cols=5)
+
+# Compute dynamic highlights from the PMS data
+closed_months_pf = [m for m in pf_m if m["source"] == "actual"]
+closed_count = len(closed_months_pf)
+if closed_months_pf:
+    max_month = max(closed_months_pf, key=lambda m: m["gross"])
+    max_month_label = max_month["month"]
+    max_month_gross = max_month["gross"]
+    occ_min = min(m["occ"] for m in closed_months_pf)
+    occ_max = max(m["occ"] for m in closed_months_pf)
+    first_month_label = closed_months_pf[0]["month"]
+    last_month_label = closed_months_pf[-1]["month"]
+else:
+    max_month_label, max_month_gross = "-", 0
+    occ_min, occ_max = 0, 0
+    first_month_label, last_month_label = "-", "-"
+
 highlights = [
     f"Total project basis: ${QBO_BS_2026['fixed_assets']['total']:,.0f} (per QBO balance sheet)",
     f"Existing debt: ${QBO_BS_2026['lt_debt']['total']:,.0f} - seeking refinance",
-    f"Occupancy trending from 75% (Jan) to 88% (Mar) - strong ramp trajectory",
-    f"April booked at ${pf_m[3]['gross']:,} gross - highest month to date",
+    f"Occupancy ranging from {occ_min:.0f}% to {occ_max:.0f}% across closed months ({first_month_label} - {last_month_label}) - strong operating performance",
+    f"Best month to date: {max_month_label} at ${max_month_gross:,} gross",
     f"Owner margin of {D['summary']['ownerMargin']}% - efficient operations with low OTA commission rates",
-    f"QBO YTD NOI of ${QBO_PL_2026['noi']:,.0f} in first 3.5 months of operations",
+    f"QBO YTD NOI of ${QBO_PL_2026['noi']:,.0f} through May 31 (5 months of operations)",
 ]
 for h in highlights:
     ws1.cell(r, 1, f"•  {h}").font = BODY
@@ -369,9 +390,11 @@ for ed in exp_m:
     if len(parts) == 2 and int(parts[1]) + 2000 == 2026:
         exp_by_month[parts[0]] = ed
 
-# Determine which months are closed (have both revenue and expense data)
+# Determine which months are fully closed (actual data, not in-progress)
+# Only "actual" months show in the YTD P&L - current/booked months would mislead
+# with partial expense data.
 closed_months = [m for m in MONTHS if m in rev_by_month and m in exp_by_month
-                 and pf_m[MONTHS.index(m)]["source"] in ("actual", "booked")]
+                 and pf_m[MONTHS.index(m)]["source"] == "actual"]
 num_months = len(closed_months)
 num_cols = num_months + 2  # label col + monthly cols + YTD col
 ytd_col = num_months + 2
@@ -518,7 +541,7 @@ r += 2
 ws3.cell(r, 1, "QBO RECONCILIATION").font = SECTION_FONT
 for c in range(1, num_cols + 1): ws3.cell(r, c).border = THICK_B
 r += 1
-ws3.cell(r, 1, f"QBO YTD Rental Income (Jan 1 – Apr 14): ${QBO_PL_2026['rent']:,.0f}").font = NOTE_FONT
+ws3.cell(r, 1, f"QBO YTD Rental Income (Jan 1 – May 31): ${QBO_PL_2026['rent']:,.0f}").font = NOTE_FONT
 ws3.merge_cells(f"A{r}:{get_column_letter(num_cols)}{r}")
 r += 1
 ws3.cell(r, 1, f"QBO YTD Total Expenses: ${QBO_PL_2026['expenses']['total']:,.0f}  |  QBO YTD NOI: ${QBO_PL_2026['noi']:,.0f}").font = NOTE_FONT
