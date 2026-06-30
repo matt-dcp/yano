@@ -452,14 +452,15 @@ def compute(bookings, expenses):
             actual_exp_lookup[parts[0]] = ed
 
     # Classify months as closed / current / future
+    # A month is "closed" once we reach its last day (operating activity is locked).
     month_status = {}
     for i, name in enumerate(MONTH_NAMES_PF):
         mn = i + 1
         m_end = date(2026, mn, calendar.monthrange(2026, mn)[1])
         m_start = date(2026, mn, 1)
-        if m_end < today:
+        if m_end <= today:
             month_status[name] = "closed"
-        elif m_start <= today <= m_end:
+        elif m_start <= today < m_end:
             month_status[name] = "current"
         else:
             month_status[name] = "future"
