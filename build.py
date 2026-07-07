@@ -537,15 +537,20 @@ def compute(bookings, expenses):
         avail_nights = NUM_UNITS * avail_days
 
         if status in ("closed", "current") and name in actual_rev:
-            # Use actual income + actual expenses from the uploaded data
+            # Use actual income from PMS; use actual expenses if available,
+            # otherwise fall back to projected OpEx (scaled to actual bookings).
+            # This prevents NOI inflation for a current month before its
+            # expenses have posted to the bookkeeping CSV.
             rev = actual_rev[name]
             exp = actual_exp_lookup.get(name)
             if exp:
                 month_opex = exp["total"] - exp.get("mgmt", 0)
                 month_clean = exp["cleaning"]
             else:
-                month_opex = 0
-                month_clean = 0
+                # Project OpEx: cleaning scaled to actual bookings + trailing non-cleaning avg
+                proj_clean = round(clean_cost * rev["bookings"])
+                month_opex = proj_clean + round(trailing_non_clean)
+                month_clean = proj_clean
             pf_total_cleaning += month_clean
             pf_total_other_opex += month_opex - month_clean
             pf_monthly.append({
