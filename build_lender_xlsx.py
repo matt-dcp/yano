@@ -77,9 +77,9 @@ def section_hdr(ws, row, title, cols=2):
     for c in range(1, cols+1): ws.cell(row, c).border = THICK_B
     return row + 1
 
-# QBO data (hardcoded from extracted financials - updated June 4, 2026 for period through May 31, 2026)
-QBO_AS_OF_DATE = "May 31, 2026"
-QBO_PERIOD = "January 1 - May 31, 2026"
+# QBO data (hardcoded from extracted financials - updated July 2, 2026 for period through June 30, 2026)
+QBO_AS_OF_DATE = "June 30, 2026"
+QBO_PERIOD = "January 1 - June 30, 2026"
 
 QBO_BS_2026 = {
     "cash": 1457,
@@ -95,29 +95,29 @@ QBO_BS_2026 = {
     "lt_debt": {"cdrbc": 1000000, "gft_ira": 500000, "total": 1500000},
     "total_liab": 1502063.95,
     "retained_earnings": -343121.08,
-    "net_income_ytd": 72502.37,
-    "total_equity": -270618.71,
+    "net_income_ytd": 110651.90,
+    "total_equity": -232469.18,
 }
 
 QBO_PL_2026 = {
-    "rent": 273154.41,
+    "rent": 341945.84,
     "expenses": {
-        "advertising": 2984.60, "commissions": 434.95, "guest_relations": 539.50,
-        "mgmt_fee": 27785.93, "landscaping": 450,
-        "cleaning": 35576.28, "fire_safety": 450, "general_repairs": 4309.90, "pest_control": 210,
-        "disposal": 50,
-        "repairs_total": 40596.18,
-        "supplies": 11090.99,
-        "city_county_tax": 25418.29, "property_tax": 13339.62, "state_tax": 1612.76,
-        "taxes_total": 40370.67,
-        "electricity": 302.01, "gas": 329.37, "internet": 1395.90, "water": 2764.64,
-        "utilities_total": 4791.92,
-        "total": 129044.74,
+        "advertising": 3034.60, "commissions": 434.95, "guest_relations": 539.50,
+        "mgmt_fee": 34503.63, "landscaping": 450,
+        "cleaning": 43516.28, "fire_safety": 450, "general_repairs": 4633.62, "pest_control": 210,
+        "disposal": 50, "security": 262.19,
+        "repairs_total": 49121.99,
+        "supplies": 15280.07,
+        "city_county_tax": 35276.07, "property_tax": 13339.62, "state_tax": 1612.76,
+        "taxes_total": 50228.45,
+        "electricity": 363.65, "gas": 329.37, "internet": 1628.55, "water": 3771.78,
+        "utilities_total": 6093.35,
+        "total": 159686.64,
     },
-    "noi": 144109.67,
+    "noi": 182259.20,
     "bank_charges": 357.30,
     "mortgage_interest": 71250,
-    "net_income": 72502.37,
+    "net_income": 110651.90,
 }
 
 
@@ -165,7 +165,7 @@ ws1.cell(r_ytd_start, 4).border = THICK_B
 ws1.cell(r_ytd_start, 5).border = THICK_B
 
 ytd_items = [
-    ("Period", "Jan 1 – May 31, 2026", None),
+    ("Period", "Jan 1 – Jun 30, 2026", None),
     ("Rental Income", QBO_PL_2026["rent"], MONEY),
     ("Total Operating Expenses", QBO_PL_2026["expenses"]["total"], MONEY),
     ("Net Operating Income", QBO_PL_2026["noi"], MONEY),
@@ -215,7 +215,7 @@ highlights = [
     f"Occupancy ranging from {occ_min:.0f}% to {occ_max:.0f}% across closed months ({first_month_label} - {last_month_label}) - strong operating performance",
     f"Best month to date: {max_month_label} at ${max_month_gross:,} gross",
     f"Owner margin of {D['summary']['ownerMargin']}% - efficient operations with low OTA commission rates",
-    f"QBO YTD NOI of ${QBO_PL_2026['noi']:,.0f} through May 31 (5 months of operations)",
+    f"QBO YTD NOI of ${QBO_PL_2026['noi']:,.0f} through June 30 (6 months of operations, annualizes to ~${QBO_PL_2026['noi']*2:,.0f})",
 ]
 for h in highlights:
     ws1.cell(r, 1, f"•  {h}").font = BODY
@@ -541,7 +541,7 @@ r += 2
 ws3.cell(r, 1, "QBO RECONCILIATION").font = SECTION_FONT
 for c in range(1, num_cols + 1): ws3.cell(r, c).border = THICK_B
 r += 1
-ws3.cell(r, 1, f"QBO YTD Rental Income (Jan 1 – May 31): ${QBO_PL_2026['rent']:,.0f}").font = NOTE_FONT
+ws3.cell(r, 1, f"QBO YTD Rental Income (Jan 1 – Jun 30): ${QBO_PL_2026['rent']:,.0f}").font = NOTE_FONT
 ws3.merge_cells(f"A{r}:{get_column_letter(num_cols)}{r}")
 r += 1
 ws3.cell(r, 1, f"QBO YTD Total Expenses: ${QBO_PL_2026['expenses']['total']:,.0f}  |  QBO YTD NOI: ${QBO_PL_2026['noi']:,.0f}").font = NOTE_FONT
