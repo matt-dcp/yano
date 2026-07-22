@@ -174,8 +174,9 @@ pf_items = [
     ("Projection Basis", f"{PF['closedMonths']} months actuals + seasonal model", None),
     ("Gross Revenue", PF["gross"], MONEY),
     ("Net to Owner", PF["netOwner"], MONEY),
-    ("Total OpEx + Fixed", PF["opex"] + PF["mgmtFee"] + PF["propertyTax"] + PF["insurance"] + PF["otherFixed"], MONEY),
-    ("NOI (After Known Fixed)", PF["noiAfterKnown"], MONEY),
+    ("Total OpEx + Mgmt + PT", PF["opex"] + PF["mgmtFee"] + PF["propertyTax"], MONEY),
+    ("NOI Cash (matches QBO)", PF.get("noiCash", PF["noiAfterKnown"]), MONEY),
+    ("NOI Normalized (Underwriting)", PF.get("noiNormalized", PF["noiAfterKnown"]), MONEY),
     ("Avg ADR (Blended)", PF["avgAdr"], MONEY),
     ("Avg Occupancy (Blended)", PF["avgOcc"] / 100, PCT),
 ]
@@ -187,7 +188,7 @@ r_ytd_end = r
 
 r = start_r
 for label, val, fmt in pf_items:
-    write_item(ws1, r, label, val, fmt, bold=(label == "NOI (After Known Fixed)"), col_label=4, col_val=5)
+    write_item(ws1, r, label, val, fmt, bold=(label.startswith("NOI")), col_label=4, col_val=5)
     r += 1
 
 r = max(r_ytd_end, r) + 1
@@ -710,33 +711,26 @@ ws7.cell(r, 2, "Amount").font = HEADER_FONT
 ws7.cell(r, 3, "% of Gross").font = HEADER_FONT
 r += 1
 
-# Pull values from source pro forma model
+# Pull values from source pro forma model (QBO-driven)
 pf_gross = PF["gross"]
 pf_net_owner = PF["netOwner"]
-pf_direct_opex = PF["opex"]  # Direct OpEx (cleaning + supplies/maint/other)
+pf_all_opex = PF["opex"]  # All operating expenses (from QBO closed months + trailing avg projections)
 pf_mgmt_fee_input = PF["mgmtFee"]
-pf_prop_tax_input = PF["propertyTax"]
-pf_insurance_input = PF["insurance"]
-pf_other_fixed_input = PF["otherFixed"]
-pf_expected_noi = PF["noiAfterKnown"]
-wf = PF["waterfall"]
+pf_nov_prop_tax = PF["propertyTax"]  # Only the Nov 2nd installment projection
+pf_insurance_input = PF["insurance"]  # Annual premium (for normalization only)
+pf_noi_cash = PF.get("noiCash", PF["noiAfterKnown"])
+pf_noi_normalized = PF.get("noiNormalized", PF["noiAfterKnown"])
 
 # Compute exact OTA and Processing dollar amounts that reconcile to Net to Owner.
 # Net to Owner = Gross - OTA Commission - Processing Fees (TOT is pass-through, not deducted).
-# Allocate channel costs between OTA and Processing using actual observed ratios.
 channel_costs = pf_gross - pf_net_owner
-ota_pct_summary = D["summary"]["otaPct"] / 100  # blended OTA % from actual bookings
-proc_pct_approx = 0.007  # ~0.7% from booking-level analysis (processing on direct bookings)
-# Allocate channel_costs proportionally to maintain exact reconciliation
+ota_pct_summary = D["summary"]["otaPct"] / 100
+proc_pct_approx = 0.007
 total_ratio = ota_pct_summary + proc_pct_approx
 ota_dollars = round(channel_costs * (ota_pct_summary / total_ratio))
-proc_dollars = channel_costs - ota_dollars  # exact remainder ensures sum reconciles
+proc_dollars = channel_costs - ota_dollars
 
-# Get cleaning and other direct opex from waterfall
-cleaning_input = -wf[5]["value"] if len(wf) > 5 and wf[5]["name"] == "Cleaning" else round(pf_direct_opex * 0.4)
-other_opex_input = -wf[6]["value"] if len(wf) > 6 and "Supplies" in wf[6]["name"] else (pf_direct_opex - cleaning_input)
-
-# ── Build P&L with formulas ──
+# ── Build P&L with formulas (QBO-driven model) ──
 gross_row = r
 ws7.cell(r, 1, "Gross Revenue").font = BOLD
 ws7.cell(r, 2, pf_gross).number_format = MONEY
@@ -790,8 +784,8 @@ for c in range(1, 4):
 r += 1
 
 opex_start_row = r
-ws7.cell(r, 1, "  Cleaning").font = BODY
-ws7.cell(r, 2, -cleaning_input).number_format = MONEY
+ws7.cell(r, 1, "  Operating Expenses (QBO-driven, all-in)").font = BODY
+ws7.cell(r, 2, -pf_all_opex).number_format = MONEY
 ws7.cell(r, 2).font = BODY
 ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
 ws7.cell(r, 3).number_format = PCT
@@ -799,16 +793,7 @@ for c in range(1, 4):
     ws7.cell(r, c).border = THIN_B
 r += 1
 
-ws7.cell(r, 1, "  Supplies, Maintenance, Other").font = BODY
-ws7.cell(r, 2, -other_opex_input).number_format = MONEY
-ws7.cell(r, 2).font = BODY
-ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
-ws7.cell(r, 3).number_format = PCT
-for c in range(1, 4):
-    ws7.cell(r, c).border = THIN_B
-r += 1
-
-# Management Fee - FORMULA: 10% of Gross
+# Management Fee - FORMULA: 10% of Gross (calculated separately since it scales with revenue)
 ws7.cell(r, 1, "  Management Fee (10% of Gross)").font = BODY
 ws7.cell(r, 2).value = f"=-0.10*B{gross_row}"
 ws7.cell(r, 2).number_format = MONEY
@@ -819,26 +804,9 @@ for c in range(1, 4):
     ws7.cell(r, c).border = THIN_B
 r += 1
 
-ws7.cell(r, 1, "  Property Tax").font = BODY
-ws7.cell(r, 2, -pf_prop_tax_input).number_format = MONEY
-ws7.cell(r, 2).font = BODY
-ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
-ws7.cell(r, 3).number_format = PCT
-for c in range(1, 4):
-    ws7.cell(r, c).border = THIN_B
-r += 1
-
-ws7.cell(r, 1, "  Insurance").font = BODY
-ws7.cell(r, 2, -pf_insurance_input).number_format = MONEY
-ws7.cell(r, 2).font = BODY
-ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
-ws7.cell(r, 3).number_format = PCT
-for c in range(1, 4):
-    ws7.cell(r, c).border = THIN_B
-r += 1
-
-ws7.cell(r, 1, "  Other Fixed Costs (utilities, internet, etc.)").font = BODY
-ws7.cell(r, 2, -pf_other_fixed_input).number_format = MONEY
+# November property tax second installment (projected)
+ws7.cell(r, 1, "  November Property Tax 2nd Installment").font = BODY
+ws7.cell(r, 2, -pf_nov_prop_tax).number_format = MONEY
 ws7.cell(r, 2).font = BODY
 ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
 ws7.cell(r, 3).number_format = PCT
@@ -860,11 +828,40 @@ for c in range(1, 4):
     ws7.cell(r, c).border = THICK_B
 r += 2
 
-# NOI - FORMULA: Net to Owner + Total OpEx (since OpEx is negative)
-noi_row = r
+# NOI Cash - matches QBO exactly (insurance was prepaid Dec 2025, not in 2026 books)
+noi_cash_row = r
 NOI_FONT = Font(name="Arial", bold=True, size=12, color="2D8B2D")
-ws7.cell(r, 1, "Net Operating Income").font = NOI_FONT
+ws7.cell(r, 1, "Net Operating Income (Cash - matches QBO)").font = NOI_FONT
 ws7.cell(r, 2).value = f"=B{net_to_owner_row}+B{total_opex_row}"
+ws7.cell(r, 2).number_format = MONEY
+ws7.cell(r, 2).font = NOI_FONT
+ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
+ws7.cell(r, 3).number_format = PCT
+ws7.cell(r, 3).font = NOI_FONT
+for c in range(1, 4):
+    ws7.cell(r, c).fill = GREEN_FILL
+    ws7.cell(r, c).border = THIN_B
+r += 2
+
+# Insurance normalization (adjustment for underwriting)
+ws7.cell(r, 1, "Normalization Adjustment").font = SECTION_FONT
+for c in range(1, 4):
+    ws7.cell(r, c).fill = LIGHT_GRAY
+r += 1
+ws7.cell(r, 1, "  Insurance (annual premium, prepaid Dec 2025)").font = BODY
+insurance_row = r
+ws7.cell(r, 2, -pf_insurance_input).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
+ws7.cell(r, 3).number_format = PCT
+for c in range(1, 4):
+    ws7.cell(r, c).border = THIN_B
+r += 2
+
+# NOI Normalized - includes insurance for underwriting
+noi_norm_row = r
+ws7.cell(r, 1, "Net Operating Income (Normalized - for Underwriting)").font = NOI_FONT
+ws7.cell(r, 2).value = f"=B{noi_cash_row}+B{insurance_row}"
 ws7.cell(r, 2).number_format = MONEY
 ws7.cell(r, 2).font = NOI_FONT
 ws7.cell(r, 3).value = f"=B{r}/B{gross_row}"
@@ -881,31 +878,50 @@ for c in range(1, 4):
     ws7.cell(r, c).border = THICK_B
 r += 1
 
-ws7.cell(r, 1, "Expected NOI (from model)").font = BODY
-ws7.cell(r, 2, pf_expected_noi).number_format = MONEY
+ws7.cell(r, 1, "Expected NOI Cash (from source model)").font = BODY
+ws7.cell(r, 2, pf_noi_cash).number_format = MONEY
 ws7.cell(r, 2).font = BODY
-expected_noi_row = r
+expected_cash_row = r
 r += 1
 
-ws7.cell(r, 1, "Calculated NOI (this tab)").font = BODY
-ws7.cell(r, 2).value = f"=B{noi_row}"
+ws7.cell(r, 1, "Calculated NOI Cash (this tab)").font = BODY
+ws7.cell(r, 2).value = f"=B{noi_cash_row}"
 ws7.cell(r, 2).number_format = MONEY
 ws7.cell(r, 2).font = BODY
-calc_noi_row = r
+calc_cash_row = r
 r += 1
 
-ws7.cell(r, 1, "Variance").font = BODY
-ws7.cell(r, 2).value = f"=B{calc_noi_row}-B{expected_noi_row}"
+ws7.cell(r, 1, "Expected NOI Normalized (from source model)").font = BODY
+ws7.cell(r, 2, pf_noi_normalized).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+expected_norm_row = r
+r += 1
+
+ws7.cell(r, 1, "Calculated NOI Normalized (this tab)").font = BODY
+ws7.cell(r, 2).value = f"=B{noi_norm_row}"
 ws7.cell(r, 2).number_format = MONEY
 ws7.cell(r, 2).font = BODY
-var_row = r
+calc_norm_row = r
+r += 1
+
+ws7.cell(r, 1, "Cash Variance").font = BODY
+ws7.cell(r, 2).value = f"=B{calc_cash_row}-B{expected_cash_row}"
+ws7.cell(r, 2).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+var_cash_row = r
+r += 1
+
+ws7.cell(r, 1, "Normalized Variance").font = BODY
+ws7.cell(r, 2).value = f"=B{calc_norm_row}-B{expected_norm_row}"
+ws7.cell(r, 2).number_format = MONEY
+ws7.cell(r, 2).font = BODY
+var_norm_row = r
 r += 1
 
 ws7.cell(r, 1, "Status").font = BOLD
-ws7.cell(r, 2).value = f'=IF(ABS(B{var_row})<=1,"OK - reconciles","REVIEW - variance exceeds $1")'
+ws7.cell(r, 2).value = f'=IF(AND(ABS(B{var_cash_row})<=1,ABS(B{var_norm_row})<=1),"OK - reconciles","REVIEW - variance exceeds $1")'
 ws7.cell(r, 2).font = BOLD
 status_row = r
-# Conditional formatting on status cell
 ws7.conditional_formatting.add(f"B{status_row}",
     FormulaRule(formula=[f'B{status_row}="OK - reconciles"'],
                 fill=GREEN_FILL,
@@ -915,6 +931,25 @@ ws7.conditional_formatting.add(f"B{status_row}",
                 fill=RED_FILL,
                 font=Font(name="Arial", bold=True, color="E53935")))
 r += 2
+
+# ── DATA SOURCES NOTE ──
+ws7.cell(r, 1, "DATA SOURCES").font = SECTION_FONT
+for c in range(1, 4):
+    ws7.cell(r, c).border = THICK_B
+r += 1
+data_source_notes = [
+    f"Operating Expenses: QuickBooks Online monthly P&L for closed months ({PF['closedMonths']} months so far); trailing 3-month average for projected months.",
+    "Management Fee: 10% of gross revenue per management agreement with ZenStay Inc.",
+    "November Property Tax: Second SB County installment projection ($13,340); first installment paid in March.",
+    "Insurance: Annual premium of $13,500 was prepaid in December 2025, so does not appear in 2026 cash-basis QBO.",
+    "  Shown as normalization adjustment for underwriting purposes to reflect true ongoing cost structure.",
+    "Bookkeeping: Paid through DCP parent entity; not a property-level expense (excluded).",
+]
+for note in data_source_notes:
+    ws7.cell(r, 1, note).font = NOTE_FONT
+    ws7.merge_cells(f"A{r}:C{r}")
+    r += 1
+r += 1
 
 # ── PASS-THROUGH TAXES & FEES (INFORMATIONAL) ──
 ws7.cell(r, 1, "PASS-THROUGH TAXES & FEES (INFORMATIONAL)").font = SECTION_FONT
@@ -973,14 +1008,16 @@ ws7.cell(r, 2).border = THICK_B
 ws7.cell(r, 3).border = THICK_B
 r += 1
 methodology = (
-    "Pro forma projections blend closed-month actuals (sourced from PMS booking data and "
-    "QuickBooks) with a seasonal model for future months. The seasonal model de-seasonalizes "
-    "actual ADR and occupancy performance to establish a baseline, then applies monthly seasonal "
-    "indices derived from Santa Barbara STR demand patterns to project forward revenue. Operating "
-    "expenses are projected from trailing actuals, with cleaning costs scaled per turnover and "
-    "fixed costs (management, property tax, insurance) carried at known annual amounts. The model "
-    "recalibrates automatically as each month closes, incorporating new actuals into the baseline "
-    "- meaning projections tighten over time as operating history grows."
+    "REVENUE: Pro forma projections blend closed-month actuals (from PMS booking data) with "
+    "a seasonal model for future months. The seasonal model de-seasonalizes actual ADR and "
+    "occupancy performance to establish a baseline, then applies monthly seasonal indices "
+    "derived from Santa Barbara STR demand patterns to project forward revenue. "
+    "EXPENSES: Operating expenses flow directly from QuickBooks Online monthly P&L for closed "
+    "months (audited source of truth); future months use a trailing 3-month average by "
+    "category. Management fee is calculated separately as 10% of gross revenue. Property tax "
+    "second installment projected for November. Insurance is shown as a normalization "
+    "adjustment (annual premium was prepaid in Dec 2025 and is not in the 2026 cash-basis "
+    "books). The model recalibrates automatically as each month closes."
 )
 ws7.cell(r, 1, methodology).font = BODY
 ws7.cell(r, 1).alignment = Alignment(wrap_text=True, vertical="top")
