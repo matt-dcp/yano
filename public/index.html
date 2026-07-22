@@ -579,60 +579,122 @@
                             </tr>
                           </thead>
                           <tbody>
-                            {pl.rows.map((r, i) => {
-                              const bg = bgFor(r.type);
-                              const fg = fgFor(r.type);
-                              const wt = weightFor(r.type);
-                              const isSection = r.type === "section";
-                              const isSubtotal = r.type === "subtotal";
-                              const ytd = sumRow(r);
-                              return (
-                                <tr key={i} style={{
-                                  background: bg,
-                                  borderBottom: `1px solid ${COLORS.lightGray}`,
-                                }}>
-                                  <td style={{
-                                    padding: "8px 12px",
-                                    paddingLeft: 12 + (r.indent * 18),
-                                    color: fg,
-                                    fontWeight: wt,
-                                    position: "sticky", left: 0,
+                            {(() => {
+                              // Pre-compute rent per month for margin calc
+                              const rentRow = pl.rows.find(r => r.label.toLowerCase() === "rent");
+                              const rentByMonth = rentRow ? rentRow.monthly : {};
+                              const noiIdx = pl.rows.findIndex(r => r.label.toLowerCase() === "net operating income");
+
+                              return pl.rows.flatMap((r, i) => {
+                                const bg = bgFor(r.type);
+                                const fg = fgFor(r.type);
+                                const wt = weightFor(r.type);
+                                const isSection = r.type === "section";
+                                const isSubtotal = r.type === "subtotal";
+                                const ytd = sumRow(r);
+                                const mainRow = (
+                                  <tr key={i} style={{
                                     background: bg,
-                                    borderTop: isSubtotal ? `2px solid ${COLORS.charcoal}` : "none",
-                                    textTransform: isSection ? "uppercase" : "none",
-                                    letterSpacing: isSection ? 0.5 : 0,
+                                    borderBottom: `1px solid ${COLORS.lightGray}`,
                                   }}>
-                                    {r.label}
-                                  </td>
-                                  {pl.months.map(m => {
-                                    const v = r.monthly[m] || 0;
-                                    return (
-                                      <td key={m} style={{
+                                    <td style={{
+                                      padding: "8px 12px",
+                                      paddingLeft: 12 + (r.indent * 18),
+                                      color: fg,
+                                      fontWeight: wt,
+                                      position: "sticky", left: 0,
+                                      background: bg,
+                                      borderTop: isSubtotal ? `2px solid ${COLORS.charcoal}` : "none",
+                                      textTransform: isSection ? "uppercase" : "none",
+                                      letterSpacing: isSection ? 0.5 : 0,
+                                    }}>
+                                      {r.label}
+                                    </td>
+                                    {pl.months.map(m => {
+                                      const v = r.monthly[m] || 0;
+                                      return (
+                                        <td key={m} style={{
+                                          padding: "8px 12px",
+                                          textAlign: "right",
+                                          color: fg,
+                                          fontWeight: wt,
+                                          borderTop: isSubtotal ? `2px solid ${COLORS.charcoal}` : "none",
+                                          fontVariantNumeric: "tabular-nums",
+                                        }}>
+                                          {isSection ? "" : (v ? fmt(v) : "-")}
+                                        </td>
+                                      );
+                                    })}
+                                    <td style={{
+                                      padding: "8px 12px",
+                                      textAlign: "right",
+                                      color: isSubtotal || isSection ? COLORS.charcoal : COLORS.goldDark,
+                                      fontWeight: isSection ? 700 : (isSubtotal ? 700 : 600),
+                                      background: isSection ? bg : COLORS.cream,
+                                      borderTop: isSubtotal ? `2px solid ${COLORS.charcoal}` : "none",
+                                      fontVariantNumeric: "tabular-nums",
+                                    }}>
+                                      {isSection ? "" : (ytd ? fmt(ytd) : "-")}
+                                    </td>
+                                  </tr>
+                                );
+                                // Inject NOI Margin row directly after Net Operating Income
+                                if (i === noiIdx) {
+                                  const marginBg = COLORS.greenLight;
+                                  const marginRow = (
+                                    <tr key={i + "-margin"} style={{
+                                      background: marginBg,
+                                      borderBottom: `1px solid ${COLORS.lightGray}`,
+                                    }}>
+                                      <td style={{
+                                        padding: "8px 12px",
+                                        color: COLORS.green,
+                                        fontWeight: 600,
+                                        fontStyle: "italic",
+                                        position: "sticky", left: 0,
+                                        background: marginBg,
+                                      }}>
+                                        NOI Margin
+                                      </td>
+                                      {pl.months.map(m => {
+                                        const rev = rentByMonth[m] || 0;
+                                        const noi = r.monthly[m] || 0;
+                                        const margin = rev > 0 ? (noi / rev) * 100 : 0;
+                                        return (
+                                          <td key={m} style={{
+                                            padding: "8px 12px",
+                                            textAlign: "right",
+                                            color: COLORS.green,
+                                            fontWeight: 600,
+                                            fontStyle: "italic",
+                                            fontVariantNumeric: "tabular-nums",
+                                          }}>
+                                            {rev > 0 ? margin.toFixed(1) + "%" : "-"}
+                                          </td>
+                                        );
+                                      })}
+                                      <td style={{
                                         padding: "8px 12px",
                                         textAlign: "right",
-                                        color: fg,
-                                        fontWeight: wt,
-                                        borderTop: isSubtotal ? `2px solid ${COLORS.charcoal}` : "none",
+                                        color: COLORS.green,
+                                        fontWeight: 700,
+                                        fontStyle: "italic",
+                                        background: marginBg,
                                         fontVariantNumeric: "tabular-nums",
                                       }}>
-                                        {isSection ? "" : (v ? fmt(v) : "-")}
+                                        {(() => {
+                                          const totalRev = Object.values(rentByMonth).reduce((a, b) => a + b, 0);
+                                          const totalNoi = sumRow(r);
+                                          return totalRev > 0 ? ((totalNoi / totalRev) * 100).toFixed(1) + "%" : "-";
+                                        })()}
                                       </td>
-                                    );
-                                  })}
-                                  <td style={{
-                                    padding: "8px 12px",
-                                    textAlign: "right",
-                                    color: isSubtotal || isSection ? COLORS.charcoal : COLORS.goldDark,
-                                    fontWeight: isSection ? 700 : (isSubtotal ? 700 : 600),
-                                    background: isSection ? bg : COLORS.cream,
-                                    borderTop: isSubtotal ? `2px solid ${COLORS.charcoal}` : "none",
-                                    fontVariantNumeric: "tabular-nums",
-                                  }}>
-                                    {isSection ? "" : (ytd ? fmt(ytd) : "-")}
-                                  </td>
-                                </tr>
-                              );
-                            })}
+                                    </tr>
+                                  );
+                                  return [mainRow, marginRow];
+                                }
+                                return [mainRow];
+                              });
+                            })()}
                           </tbody>
                         </table>
                       </div>
@@ -654,11 +716,13 @@
                         const noi = noiRow ? sumRow(noiRow) : (rent - totalExp);
                         const netIncome = netIncomeRow ? sumRow(netIncomeRow) : 0;
 
+                        const noiMargin = rent > 0 ? (noi / rent) * 100 : 0;
                         const cards = [
-                          { label: "YTD Rental Income", value: rent, color: COLORS.charcoal },
-                          { label: "YTD Operating Expenses", value: totalExp, color: COLORS.red },
-                          { label: "YTD Net Operating Income", value: noi, color: COLORS.green },
-                          { label: "YTD Net Income (after debt service)", value: netIncome, color: COLORS.gold },
+                          { label: "YTD Rental Income", value: fmt(rent), color: COLORS.charcoal },
+                          { label: "YTD Operating Expenses", value: fmt(totalExp), color: COLORS.red },
+                          { label: "YTD Net Operating Income", value: fmt(noi), color: COLORS.green },
+                          { label: "YTD NOI Margin", value: noiMargin.toFixed(1) + "%", color: COLORS.green },
+                          { label: "YTD Net Income (after debt service)", value: fmt(netIncome), color: COLORS.gold },
                         ];
                         return cards.map((c, i) => (
                           <div key={i} style={{ background: COLORS.white, borderRadius: 12, padding: 20,
@@ -666,7 +730,7 @@
                             <div style={{ fontSize: 11, color: COLORS.warmGray, textTransform: "uppercase",
                               letterSpacing: 0.5, fontWeight: 600 }}>{c.label}</div>
                             <div style={{ fontSize: 24, color: c.color, fontWeight: 700, marginTop: 4,
-                              fontVariantNumeric: "tabular-nums" }}>{fmt(c.value)}</div>
+                              fontVariantNumeric: "tabular-nums" }}>{c.value}</div>
                           </div>
                         ));
                       })()}
