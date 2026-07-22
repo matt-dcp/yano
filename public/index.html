@@ -150,6 +150,7 @@
         { id: "channels", label: "Channels" },
         { id: "units", label: "Units" },
         { id: "expenses", label: "Expenses" },
+        { id: "qbo", label: "QBO P&L" },
         { id: "proforma", label: "YTD & Forecast" },
         { id: "benchmark", label: "vs SB Market" },
       ];
@@ -511,6 +512,168 @@
                   </tbody>
                 </table>
               </div>
+            </>)}
+
+            {/* ═══ QBO P&L ═══ */}
+            {tab === "qbo" && (<>
+              {(() => {
+                const pl = D.qboPL || { months: [], rows: [] };
+                if (!pl.months.length) {
+                  return (
+                    <div style={{ background: COLORS.white, borderRadius: 12, padding: 32,
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.06)", textAlign: "center" }}>
+                      <div style={{ fontSize: 16, color: COLORS.warmGray }}>
+                        No QBO Monthly P&L data available.
+                      </div>
+                      <div style={{ fontSize: 13, color: COLORS.warmGray, marginTop: 8 }}>
+                        Drop the file at <code>data/QBO-Monthly-PL.xlsx</code> and rebuild.
+                      </div>
+                    </div>
+                  );
+                }
+                // Sum monthly values across all months in the file for YTD column
+                const sumRow = (r) => Object.values(r.monthly).reduce((a, b) => a + b, 0);
+                // Style helpers
+                const bgFor = (t) => {
+                  if (t === "section") return COLORS.charcoal;
+                  if (t === "subtotal") return COLORS.lightGray;
+                  return COLORS.white;
+                };
+                const fgFor = (t) => {
+                  if (t === "section") return COLORS.white;
+                  if (t === "subgroup_header") return COLORS.charcoal;
+                  return COLORS.warmGray;
+                };
+                const weightFor = (t) => {
+                  if (t === "section" || t === "subtotal" || t === "subgroup_header") return 700;
+                  return 400;
+                };
+
+                return (
+                  <>
+                    <div style={{ background: COLORS.white, borderRadius: 12, padding: 24,
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.06)", marginBottom: 24 }}>
+                      <SectionTitle>QuickBooks Profit &amp; Loss - Monthly Detail</SectionTitle>
+                      <p style={{ fontSize: 13, color: COLORS.warmGray, marginBottom: 16, lineHeight: 1.6 }}>
+                        Source: QuickBooks Online cash-basis P&amp;L, exported after each month close.
+                        Shows the same monthly financials your bookkeeper produces - use this to avoid
+                        logging into QBO. Note: insurance was prepaid in Dec 2025 (full 12-month premium),
+                        so it does not appear in 2026 cash P&amp;L. Bookkeeping is paid through DCP parent
+                        entity, not the property. Property tax first installment paid in March; second
+                        installment expected in November.
+                      </p>
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                          <thead>
+                            <tr style={{ background: COLORS.charcoal, color: COLORS.white }}>
+                              <th style={{ padding: "10px 12px", textAlign: "left", position: "sticky", left: 0, background: COLORS.charcoal, minWidth: 260 }}>
+                                Line Item
+                              </th>
+                              {pl.months.map(m => (
+                                <th key={m} style={{ padding: "10px 12px", textAlign: "right", minWidth: 90 }}>{m}</th>
+                              ))}
+                              <th style={{ padding: "10px 12px", textAlign: "right", minWidth: 100,
+                                background: COLORS.goldDark }}>
+                                YTD Total
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {pl.rows.map((r, i) => {
+                              const bg = bgFor(r.type);
+                              const fg = fgFor(r.type);
+                              const wt = weightFor(r.type);
+                              const isSection = r.type === "section";
+                              const isSubtotal = r.type === "subtotal";
+                              const ytd = sumRow(r);
+                              return (
+                                <tr key={i} style={{
+                                  background: bg,
+                                  borderBottom: `1px solid ${COLORS.lightGray}`,
+                                }}>
+                                  <td style={{
+                                    padding: "8px 12px",
+                                    paddingLeft: 12 + (r.indent * 18),
+                                    color: fg,
+                                    fontWeight: wt,
+                                    position: "sticky", left: 0,
+                                    background: bg,
+                                    borderTop: isSubtotal ? `2px solid ${COLORS.charcoal}` : "none",
+                                    textTransform: isSection ? "uppercase" : "none",
+                                    letterSpacing: isSection ? 0.5 : 0,
+                                  }}>
+                                    {r.label}
+                                  </td>
+                                  {pl.months.map(m => {
+                                    const v = r.monthly[m] || 0;
+                                    return (
+                                      <td key={m} style={{
+                                        padding: "8px 12px",
+                                        textAlign: "right",
+                                        color: fg,
+                                        fontWeight: wt,
+                                        borderTop: isSubtotal ? `2px solid ${COLORS.charcoal}` : "none",
+                                        fontVariantNumeric: "tabular-nums",
+                                      }}>
+                                        {isSection ? "" : (v ? fmt(v) : "-")}
+                                      </td>
+                                    );
+                                  })}
+                                  <td style={{
+                                    padding: "8px 12px",
+                                    textAlign: "right",
+                                    color: isSubtotal || isSection ? COLORS.charcoal : COLORS.goldDark,
+                                    fontWeight: isSection ? 700 : (isSubtotal ? 700 : 600),
+                                    background: isSection ? bg : COLORS.cream,
+                                    borderTop: isSubtotal ? `2px solid ${COLORS.charcoal}` : "none",
+                                    fontVariantNumeric: "tabular-nums",
+                                  }}>
+                                    {isSection ? "" : (ytd ? fmt(ytd) : "-")}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Reconciliation callouts */}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                      gap: 16, marginTop: 16 }}>
+                      {(() => {
+                        // Find YTD totals
+                        const findRow = (label) => pl.rows.find(r => r.label.toLowerCase() === label.toLowerCase());
+                        const rentRow = findRow("Rent");
+                        const totalIncomeRow = findRow("Total for Income");
+                        const totalExpRow = findRow("Total for Expenses");
+                        const noiRow = findRow("Net Operating Income");
+                        const netIncomeRow = findRow("Net Income");
+                        const rent = rentRow ? sumRow(rentRow) : 0;
+                        const totalExp = totalExpRow ? sumRow(totalExpRow) : 0;
+                        const noi = noiRow ? sumRow(noiRow) : (rent - totalExp);
+                        const netIncome = netIncomeRow ? sumRow(netIncomeRow) : 0;
+
+                        const cards = [
+                          { label: "YTD Rental Income", value: rent, color: COLORS.charcoal },
+                          { label: "YTD Operating Expenses", value: totalExp, color: COLORS.red },
+                          { label: "YTD Net Operating Income", value: noi, color: COLORS.green },
+                          { label: "YTD Net Income (after debt service)", value: netIncome, color: COLORS.gold },
+                        ];
+                        return cards.map((c, i) => (
+                          <div key={i} style={{ background: COLORS.white, borderRadius: 12, padding: 20,
+                            boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderLeft: `4px solid ${c.color}` }}>
+                            <div style={{ fontSize: 11, color: COLORS.warmGray, textTransform: "uppercase",
+                              letterSpacing: 0.5, fontWeight: 600 }}>{c.label}</div>
+                            <div style={{ fontSize: 24, color: c.color, fontWeight: 700, marginTop: 4,
+                              fontVariantNumeric: "tabular-nums" }}>{fmt(c.value)}</div>
+                          </div>
+                        ));
+                      })()}
+                    </div>
+                  </>
+                );
+              })()}
             </>)}
 
             {/* ═══ PERFORMANCE VS PLAN ═══ */}

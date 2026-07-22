@@ -313,11 +313,78 @@ def load_qbo_monthly_pl():
             "mgmt": 0, "taxes": 0, "utilities": 0, "other": 0,
         }}
 
+    # Also capture line-item detail preserving QBO structure for dashboard display
+    pl_rows = []  # each: {"label", "type", "indent", "monthly": {m: val}}
+    current_section = None  # e.g., "Income", "Expenses", "Other Expenses"
+    subgroup_labels = {
+        "advertising & marketing": 0,
+        "repairs & maintenance": 0,
+        "supplies": 0,
+        "taxes paid": 0,
+        "utilities": 0,
+        "bank charges": 0,
+        "interest paid": 0,
+    }
+
     for row in range(data_start_row, ws.max_row + 1):
         label = ws.cell(row, 1).value
         if not label or not isinstance(label, str):
             continue
-        label_lower = label.strip().lower()
+        label_stripped = label.strip()
+        label_lower = label_stripped.lower()
+
+        # Section headers (Income, Expenses, Other Expenses)
+        if label_lower in ("income", "expenses", "other expenses"):
+            current_section = label_lower
+            pl_rows.append({"label": label_stripped.upper(), "type": "section", "indent": 0, "monthly": {}})
+            continue
+
+        # Skip the timestamp footer
+        if "cash basis" in label_lower and ":" in label_stripped:
+            continue
+
+        # Detect subtotals and store them with monthly values
+        is_subtotal = label_lower in section_headers
+        is_subgroup = label_lower in subgroup_labels
+        is_below_line = label_lower in below_line_labels
+
+        # Collect monthly values
+        monthly_vals = {}
+        for m_label, col in month_cols.items():
+            val = ws.cell(row, col).value
+            if isinstance(val, (int, float)):
+                monthly_vals[m_label] = val
+            else:
+                monthly_vals[m_label] = 0
+
+        # Determine display type and indentation
+        if is_subtotal:
+            row_type = "subtotal"
+            indent = 0
+            if "total for" in label_lower:
+                indent = 1  # subgroup subtotals are indented
+            if label_lower in ("total for expenses", "total for income", "total for other expenses"):
+                indent = 0
+        elif is_subgroup:
+            row_type = "subgroup_header"
+            indent = 1
+        elif label_lower == "rent":
+            row_type = "line_item"
+            indent = 1
+        else:
+            # Detail line item under a subgroup
+            row_type = "line_item"
+            indent = 2
+
+        pl_rows.append({
+            "label": label_stripped,
+            "type": row_type,
+            "indent": indent,
+            "section": current_section or "",
+            "monthly": monthly_vals,
+        })
+
+        # ── Continue with existing bucket-summarization logic ──
 
         # Rent (income)
         if label_lower == "rent":
@@ -327,8 +394,8 @@ def load_qbo_monthly_pl():
                     result[m_label]["rent"] += val
             continue
 
-        # Skip section headers, subtotals, below-line items
-        if label_lower in section_headers or label_lower in below_line_labels:
+        # Skip section headers, subtotals, below-line items for bucket aggregation
+        if is_subtotal or is_below_line or is_subgroup:
             continue
 
         # Map to a bucket
@@ -351,6 +418,12 @@ def load_qbo_monthly_pl():
     months_with_data = [m for m, d in result.items() if d["total"] > 0 or d["rent"] > 0]
     if months_with_data:
         print(f"  QBO closed months: {', '.join(months_with_data)}")
+
+    # Return both the bucketed result and the line-item detail
+    result["_pl_detail"] = {
+        "months": list(month_cols.keys()),
+        "rows": pl_rows,
+    }
     return result
 
 # ════════════════════════════════════════════════════════════════
@@ -548,6 +621,9 @@ def compute(bookings, expenses, qbo_monthly=None):
     # 1. Populate from QBO Monthly P&L for closed months
     qbo_months_used = set()
     for m_label, mdata in qbo_monthly.items():
+        # Skip internal meta keys (e.g., _pl_detail)
+        if m_label.startswith("_"):
+            continue
         if mdata["total"] > 0 or mdata["rent"] > 0:
             for bucket, val in mdata["buckets"].items():
                 exp_monthly[m_label][bucket] = val
@@ -1064,6 +1140,7 @@ def compute(bookings, expenses, qbo_monthly=None):
         "unitData": unit_data,
         "expenseCategories": expense_categories,
         "expenseMonthly": expense_monthly,
+        "qboPL": qbo_monthly.get("_pl_detail", {"months": [], "rows": []}),
         "topVendors": top_vendors,
         "sbCompData": sb_comp,
         "actualsVsPf": actuals_vs_pf,
