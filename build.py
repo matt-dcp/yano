@@ -23,6 +23,12 @@ from datetime import datetime, date
 from collections import defaultdict
 from pathlib import Path
 
+try:
+    from openpyxl import load_workbook
+    HAS_OPENPYXL = True
+except ImportError:
+    HAS_OPENPYXL = False
+
 DATA_DIR = Path(__file__).parent / "data"
 OUTPUT = Path(__file__).parent / "public" / "data.js"
 FORECAST_HISTORY = DATA_DIR / "forecast_history.json"
@@ -32,16 +38,18 @@ FORECAST_HISTORY = DATA_DIR / "forecast_history.json"
 # ════════════════════════════════════════════════════════════════
 OPENING_DATE = date(2025, 12, 18)
 NUM_UNITS = 6
-MGMT_FEE_PCT = 0.10          # 10% of gross
-PROPERTY_TAX_ANNUAL = 26679   # SB County 2025-26
-INSURANCE_ANNUAL = 13500      # STR commercial policy
-INTERNET_ANNUAL = 3000        # $250/mo
-BOOKKEEPING_ANNUAL = 4200     # $350/mo
-LANDSCAPE_ANNUAL = 6000       # $500/mo
-LINEN_FFE_ANNUAL = 4800       # $400/mo
-LICENSE_ANNUAL = 1200          # $100/mo
-CONSUMABLES_ANNUAL = 4800     # $400/mo
-OTHER_FIXED_ANNUAL = INTERNET_ANNUAL + BOOKKEEPING_ANNUAL + LANDSCAPE_ANNUAL + LINEN_FFE_ANNUAL + LICENSE_ANNUAL + CONSUMABLES_ANNUAL  # $24,000
+MGMT_FEE_PCT = 0.10          # 10% of gross (contract with ZenStay)
+
+# Insurance: $13,500 annual premium prepaid Dec 2025. Doesn't hit 2026 QBO
+# expenses (cash basis) but is a real ongoing cost - shown as normalization
+# adjustment in the pro forma for lender/underwriting purposes.
+INSURANCE_ANNUAL = 13500
+
+# Property tax second installment (SB County semi-annual schedule).
+# First installment $13,340 hit QBO in March 2026 (visible in actuals).
+# Second installment expected in November 2026.
+PROPERTY_TAX_2ND_INSTALLMENT = 13340
+PROPERTY_TAX_2ND_INSTALLMENT_MONTH = 11  # November
 SB_MEDIAN_ADR = 321
 SB_TOP25_ADR = 521
 SB_TYPICAL_MARGIN = 75
@@ -206,6 +214,146 @@ def load_expenses():
     return expenses
 
 # ════════════════════════════════════════════════════════════════
+# PARSE QBO MONTHLY P&L (source of truth for closed months)
+# ════════════════════════════════════════════════════════════════
+def load_qbo_monthly_pl():
+    """Parse the QBO YTD Monthly P&L file.
+
+    Returns:
+        dict keyed by "Mon '26" (e.g., "Jan '26") with values:
+            {
+              "rent": float,
+              "buckets": {
+                  "cleaning": float, "supplies": float, "maint": float,
+                  "marketing": float, "mgmt": float, "taxes": float,
+                  "utilities": float, "other": float
+              },
+              "total": float  # total operating expenses
+            }
+        Returns {} if file not found or openpyxl unavailable.
+    """
+    if not HAS_OPENPYXL:
+        print("  Warning: openpyxl not installed; skipping QBO Monthly P&L")
+        return {}
+    qbo_path = DATA_DIR / "QBO-Monthly-PL.xlsx"
+    if not qbo_path.exists():
+        print("  No QBO Monthly P&L file found (data/QBO-Monthly-PL.xlsx)")
+        return {}
+    print(f"  Loading {qbo_path.name}...")
+    wb = load_workbook(qbo_path, data_only=True)
+    ws = wb.active
+
+    # QBO YTD Monthly P&L format:
+    # - Header row has month names in columns B onward ("Jan 2026", ...)
+    # - The header row is usually row 4 or 5 (depends on QBO export version)
+    # - Last column is "Total"
+    # Find the header row and month columns by scanning for month names
+    header_row = None
+    month_cols = {}  # {"Jan '26": col_idx, ...}
+    for scan_row in range(1, 10):
+        candidate = {}
+        for col in range(2, ws.max_column + 1):
+            header = ws.cell(scan_row, col).value
+            if header and isinstance(header, str):
+                parts = header.strip().split()
+                if len(parts) == 2 and parts[1].isdigit() and len(parts[0]) >= 3:
+                    mon = parts[0][:3].capitalize()
+                    yr = parts[1][-2:]
+                    candidate[f"{mon} '{yr}"] = col
+        if candidate:
+            header_row = scan_row
+            month_cols = candidate
+            break
+    if not month_cols:
+        print(f"  Warning: Could not find month header row in QBO file")
+        return {}
+    data_start_row = header_row + 1
+
+    # Map QBO expense line items to dashboard buckets
+    # Uses substring matching against the label in column A
+    qbo_label_to_bucket = {
+        "cleaning expenses": "cleaning",
+        "supplies": "supplies",  # matches "Supplies" and "Supplies & materials"
+        "review promo": "marketing",
+        "advertising & marketing": "marketing",  # section header - handled specially
+        "hospitality management fee": "mgmt",
+        "landscaping expense": "other",  # doesn't match ZenStay-style landscaping
+        "commissions expense": "other",
+        "guest relations": "other",
+        "general repairs": "maint",
+        "disposal & waste fees": "maint",
+        "fire safety": "maint",
+        "pest control": "maint",
+        "security expense": "maint",
+        "city & county tax": "taxes",
+        "property taxes": "taxes",
+        "state tax": "taxes",
+        "electricity": "utilities",
+        "gas": "utilities",
+        "internet & tv services": "utilities",
+        "water & sewer": "utilities",
+    }
+    # Section headers that are totals (skip - already summed by line items)
+    section_headers = {
+        "total for advertising & marketing", "total for repairs & maintenance",
+        "total for supplies", "total for taxes paid", "total for utilities",
+        "total for expenses", "total for income", "gross profit",
+        "net operating income", "net income", "net other income",
+        "total for bank charges", "total for interest paid",
+        "total for other expenses",
+    }
+    # Below-the-line items (skip - not operating expenses)
+    below_line_labels = {
+        "bank fees & service charges", "mortgage interest",
+    }
+    result = {}
+    for m_label, col in month_cols.items():
+        result[m_label] = {"rent": 0, "total": 0, "buckets": {
+            "cleaning": 0, "supplies": 0, "maint": 0, "marketing": 0,
+            "mgmt": 0, "taxes": 0, "utilities": 0, "other": 0,
+        }}
+
+    for row in range(data_start_row, ws.max_row + 1):
+        label = ws.cell(row, 1).value
+        if not label or not isinstance(label, str):
+            continue
+        label_lower = label.strip().lower()
+
+        # Rent (income)
+        if label_lower == "rent":
+            for m_label, col in month_cols.items():
+                val = ws.cell(row, col).value
+                if isinstance(val, (int, float)):
+                    result[m_label]["rent"] += val
+            continue
+
+        # Skip section headers, subtotals, below-line items
+        if label_lower in section_headers or label_lower in below_line_labels:
+            continue
+
+        # Map to a bucket
+        bucket = None
+        for kw, b in qbo_label_to_bucket.items():
+            if kw in label_lower:
+                bucket = b
+                break
+        if not bucket:
+            continue
+
+        # Add each month's value to the appropriate bucket
+        for m_label, col in month_cols.items():
+            val = ws.cell(row, col).value
+            if isinstance(val, (int, float)):
+                result[m_label]["buckets"][bucket] += val
+                result[m_label]["total"] += val
+
+    # Report what we loaded
+    months_with_data = [m for m, d in result.items() if d["total"] > 0 or d["rent"] > 0]
+    if months_with_data:
+        print(f"  QBO closed months: {', '.join(months_with_data)}")
+    return result
+
+# ════════════════════════════════════════════════════════════════
 # COMPUTE METRICS
 # ════════════════════════════════════════════════════════════════
 def classify_expense(cat):
@@ -259,7 +407,9 @@ def normalize_source(src):
     else:
         return src or "Other"
 
-def compute(bookings, expenses):
+def compute(bookings, expenses, qbo_monthly=None):
+    if qbo_monthly is None:
+        qbo_monthly = {}
     today = date.today()
     days_since_launch = (today - OPENING_DATE).days
 
@@ -387,28 +537,45 @@ def compute(bookings, expenses):
             "pct": round(amt / total_expense * 100, 1) if total_expense else 0,
         })
 
-    # Monthly expenses
+    # ── Monthly expenses ──
+    # Priority: QBO Monthly P&L (closed books) > ZenStay expense CSV (interim)
+    # QBO is the audited source of truth. ZenStay is only used for months
+    # that haven't been closed in QBO yet.
     exp_monthly = defaultdict(lambda: {"total": 0, "cleaning": 0, "supplies": 0,
                                         "capex": 0, "maint": 0, "marketing": 0,
-                                        "mgmt": 0, "taxes": 0, "other": 0})
+                                        "mgmt": 0, "taxes": 0, "utilities": 0,
+                                        "other": 0, "source": "none"})
+    # 1. Populate from QBO Monthly P&L for closed months
+    qbo_months_used = set()
+    for m_label, mdata in qbo_monthly.items():
+        if mdata["total"] > 0 or mdata["rent"] > 0:
+            for bucket, val in mdata["buckets"].items():
+                exp_monthly[m_label][bucket] = val
+            exp_monthly[m_label]["total"] = mdata["total"]
+            exp_monthly[m_label]["source"] = "qbo"
+            qbo_months_used.add(m_label)
+
+    # 2. Fill in remaining months from ZenStay CSV (interim/stopgap)
     cat_map = {"Cleaning": "cleaning", "Supplies": "supplies", "CapEx": "capex",
                "Maintenance": "maint", "Marketing": "marketing",
                "Management": "mgmt", "Taxes & Licenses": "taxes"}
     for e in expenses:
         mk = month_key(e["date"])
-        if mk:
+        if mk and mk not in qbo_months_used:
             bucket = cat_map.get(classify_expense(e["category"]), "other")
             exp_monthly[mk]["total"] += e["amount"]
             exp_monthly[mk][bucket] += e["amount"]
+            exp_monthly[mk]["source"] = "zenstay"
 
     sorted_exp_months = sorted(exp_monthly.keys(), key=month_sort_key)
     expense_monthly = []
     for mk in sorted_exp_months:
         d = exp_monthly[mk]
-        expense_monthly.append({
-            "month": mk,
-            **{k: round(v) for k, v in d.items()},
-        })
+        row = {"month": mk, "source": d.get("source", "none")}
+        for k, v in d.items():
+            if k != "source":
+                row[k] = round(v)
+        expense_monthly.append(row)
 
     # Top vendors
     by_vendor = defaultdict(lambda: {"amount": 0, "category": ""})
@@ -580,12 +747,35 @@ def compute(bookings, expenses):
             })
 
     # ── Pro forma totals ──
+    # OpEx now flows entirely from QBO (closed months) or trailing QBO averages
+    # (projected months). Management fee is separately calculated as 10% of gross.
+    # Property tax and utilities and other operating expenses are IN the monthly
+    # OpEx figures - no hardcoded plugs.
     pf_gross = sum(m["gross"] for m in pf_monthly)
     pf_net_owner = sum(m["netOwner"] for m in pf_monthly)
     pf_opex = sum(m["opex"] for m in pf_monthly)
-    pf_noi_before_fixed = pf_net_owner - pf_opex
     mgmt_fee = round(pf_gross * MGMT_FEE_PCT)
-    pf_noi_after_known = pf_noi_before_fixed - mgmt_fee - PROPERTY_TAX_ANNUAL - INSURANCE_ANNUAL - OTHER_FIXED_ANNUAL
+
+    # Add expected Nov property tax second installment if not already in OpEx.
+    # (Only add if the model didn't already project it via trailing average.)
+    nov_pt_included = False
+    for m in pf_monthly:
+        if m["month"] == "Nov" and m["source"] == "actual" and m["opex"] >= PROPERTY_TAX_2ND_INSTALLMENT:
+            nov_pt_included = True
+    pt_2nd_adjustment = 0 if nov_pt_included else PROPERTY_TAX_2ND_INSTALLMENT
+
+    # Cash NOI: matches QBO cash basis (insurance was prepaid in Dec 2025, so
+    # doesn't appear in 2026 P&L)
+    pf_noi_cash = pf_net_owner - pf_opex - mgmt_fee - pt_2nd_adjustment
+
+    # Normalized NOI: adds back annualized insurance for underwriting purposes
+    # (reflects the true ongoing cost of insurance even though 2026 is prepaid)
+    pf_noi_normalized = pf_noi_cash - INSURANCE_ANNUAL
+
+    # For backward compatibility, "noiAfterKnown" now equals the normalized figure
+    # (which is closer to what a lender's underwriter would credit).
+    pf_noi_after_known = pf_noi_normalized
+
     pf_avg_occ = sum(m["occ"] for m in pf_monthly) / 12
     pf_avg_adr = round(sum(m["adr"] for m in pf_monthly) / 12)
 
@@ -719,19 +909,22 @@ def compute(bookings, expenses):
     pf_total_ota = round(pf_gross * (ota_pct / 100))
     pf_total_tax = round(pf_gross * tax_rate)
     pf_total_proc = round(pf_gross * proc_rate)
+    # Waterfall: reflects QBO-driven expense structure
+    # OpEx is now a single line item that flows from QBO actuals (closed months)
+    # and trailing QBO averages (projected months). No hardcoded property tax,
+    # utilities, landscape, etc. - all in the OpEx line.
     pf_waterfall = [
         {"name": "Gross Revenue", "value": pf_gross, "type": "positive"},
         {"name": "OTA Commissions", "value": -pf_total_ota, "type": "negative"},
         {"name": "Taxes (TOT)", "value": -pf_total_tax, "type": "negative"},
         {"name": "Processing", "value": -pf_total_proc, "type": "negative"},
         {"name": "Net to Owner", "value": pf_net_owner, "type": "subtotal"},
-        {"name": "Cleaning", "value": -round(pf_total_cleaning), "type": "opex"},
-        {"name": "Supplies/Maint/Other", "value": -round(pf_total_other_opex), "type": "opex"},
+        {"name": "Operating Expenses (QBO-driven)", "value": -round(pf_opex), "type": "opex"},
         {"name": "Mgmt Fee (10%)", "value": -mgmt_fee, "type": "mgmt"},
-        {"name": "Property Tax", "value": -PROPERTY_TAX_ANNUAL, "type": "opex"},
-        {"name": "Insurance", "value": -INSURANCE_ANNUAL, "type": "opex"},
-        {"name": "Other Fixed (6 items)", "value": -OTHER_FIXED_ANNUAL, "type": "opex"},
-        {"name": "NOI", "value": pf_noi_after_known, "type": "total"},
+        {"name": "Nov Property Tax (2nd installment)", "value": -pt_2nd_adjustment, "type": "opex"},
+        {"name": "NOI (Cash - matches QBO)", "value": pf_noi_cash, "type": "subtotal"},
+        {"name": "Insurance normalization", "value": -INSURANCE_ANNUAL, "type": "opex"},
+        {"name": "NOI (Normalized)", "value": pf_noi_normalized, "type": "total"},
     ]
 
     # ── Benchmark data ──
@@ -838,7 +1031,8 @@ def compute(bookings, expenses):
         "netOwner": round(pf_net_owner),
         "opex": pf_opex,
         "mgmtFee": mgmt_fee,
-        "noiBeforeFixed": round(pf_noi_before_fixed),
+        "noiCash": round(pf_noi_cash),
+        "noiNormalized": round(pf_noi_normalized),
         "noiAfterKnown": round(pf_noi_after_known),
     }
 
@@ -884,23 +1078,25 @@ def compute(bookings, expenses):
             "netOwner": pf_net_owner,
             "opex": pf_opex,
             "mgmtFee": mgmt_fee,
-            "propertyTax": PROPERTY_TAX_ANNUAL,
-            "insurance": INSURANCE_ANNUAL,
-            "otherFixed": OTHER_FIXED_ANNUAL,
-            "noiBeforeFixed": pf_noi_before_fixed,
-            "noiAfterKnown": pf_noi_after_known,
+            "propertyTax": pt_2nd_adjustment,  # Only the projected 2nd installment (Nov)
+            "insurance": INSURANCE_ANNUAL,     # Normalization amount (not in cash books)
+            "otherFixed": 0,                   # Deprecated - all fixed costs now in QBO OpEx
+            "noiCash": round(pf_noi_cash),
+            "noiNormalized": round(pf_noi_normalized),
+            "noiAfterKnown": round(pf_noi_after_known),  # = noiNormalized (backward compat)
             "avgOcc": round(pf_avg_occ, 1),
             "avgAdr": pf_avg_adr,
             "mgmtFeePct": MGMT_FEE_PCT,
             "baselineAdr": round(baseline_adr),
             "baselineOcc": round(baseline_occ, 1),
             "closedMonths": len(closed_metrics),
+            "qboMonthsUsed": sorted(list(qbo_months_used), key=month_sort_key),
         },
         "forecastAccuracy": forecast_accuracy,
         "config": {
             "mgmtFeePct": MGMT_FEE_PCT,
-            "propertyTaxAnnual": PROPERTY_TAX_ANNUAL,
             "insuranceAnnual": INSURANCE_ANNUAL,
+            "propertyTax2ndInstallment": PROPERTY_TAX_2ND_INSTALLMENT,
             "sbMedianAdr": SB_MEDIAN_ADR,
             "sbTop25Adr": SB_TOP25_ADR,
         },
@@ -928,11 +1124,13 @@ def main():
 
     print("\nParsing bookings...")
     bookings = load_bookings()
-    print("Parsing expenses...")
+    print("Parsing expenses (ZenStay interim)...")
     expenses = load_expenses()
+    print("Parsing QBO Monthly P&L (source of truth for closed months)...")
+    qbo_monthly = load_qbo_monthly_pl()
 
     print("\nComputing metrics...")
-    data = compute(bookings, expenses)
+    data = compute(bookings, expenses, qbo_monthly)
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     with open(OUTPUT, "w") as f:
