@@ -465,12 +465,25 @@ ws3.cell(r, 1, "INCOME").font = BOLD
 for c in range(1, num_cols + 1): ws3.cell(r, c).fill = LIGHT_GRAY
 r += 1
 
-gross_vals = [rev_by_month[m]["gross"] for m in closed_months]
-to_owner_vals = [rev_by_month[m]["toOwner"] for m in closed_months]
-r_gross = r
-r = pl_row(ws3, r, "Gross Booking Revenue", gross_vals, bold=True)
-r_to_owner = r
-r = pl_row(ws3, r, "Net to Owner (after OTA & Processing)", to_owner_vals, bold=True, fill=LIGHT_GOLD)
+# Use QBO Rent for the P&L revenue line so this tab reconciles exactly to QBO.
+# The PMS "Gross Booking Revenue" and "Net to Owner" are shown in the Operating Detail tab.
+# QBO Rent is on a cash basis (recognized when guest pays); PMS is accrual (recognized at stay).
+qbo_pl = D.get("qboPL", {"rows": [], "months": []})
+qbo_months = qbo_pl.get("months", [])
+qbo_rent_row_data = next((r for r in qbo_pl.get("rows", []) if r["label"].lower() == "rent"), None)
+
+def qbo_val_for_month(row_data, short_month):
+    """Look up a QBO row's value for a given short month like 'Jan'."""
+    if not row_data:
+        return 0
+    for m_full in qbo_months:
+        if m_full.startswith(short_month + " "):
+            return row_data["monthly"].get(m_full, 0)
+    return 0
+
+rent_vals = [qbo_val_for_month(qbo_rent_row_data, m) for m in closed_months]
+r_to_owner = r  # kept as reference name for NOI formula; represents "Rental Income" now
+r = pl_row(ws3, r, "Rental Income (QBO cash basis)", rent_vals, bold=True, fill=LIGHT_GOLD)
 
 # ── EXPENSES ──
 r += 1

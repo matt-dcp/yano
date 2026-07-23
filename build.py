@@ -394,8 +394,11 @@ def load_qbo_monthly_pl():
                     result[m_label]["rent"] += val
             continue
 
-        # Skip section headers, subtotals, below-line items for bucket aggregation
-        if is_subtotal or is_below_line or is_subgroup:
+        # Skip section headers, subtotals, below-line items for bucket aggregation.
+        # DO include subgroup headers (e.g., "Advertising & marketing", "Supplies") because
+        # QBO can post transactions directly to the parent GL account, in which case the
+        # subgroup header row has its own value that needs to be included in the sum.
+        if is_subtotal or is_below_line:
             continue
 
         # Map to a bucket
