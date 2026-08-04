@@ -164,11 +164,29 @@ ws1.cell(r_ytd_start, 4, "FULL-YEAR PRO FORMA").font = SECTION_FONT
 ws1.cell(r_ytd_start, 4).border = THICK_B
 ws1.cell(r_ytd_start, 5).border = THICK_B
 
+# Compute QBO YTD figures dynamically from the qboPL export (auto-updates as months close)
+_qbo_pl_rows = D.get("qboPL", {}).get("rows", [])
+_qbo_pl_months = D.get("qboPL", {}).get("months", [])
+
+def _qbo_ytd(label):
+    row = next((r for r in _qbo_pl_rows if r["label"].lower() == label.lower()), None)
+    return sum(row["monthly"].values()) if row else 0
+
+QBO_YTD_RENT = _qbo_ytd("Rent") or QBO_PL_2026["rent"]
+QBO_YTD_EXPENSES = _qbo_ytd("Total for Expenses") or QBO_PL_2026["expenses"]["total"]
+QBO_YTD_NOI = _qbo_ytd("Net Operating Income") or QBO_PL_2026["noi"]
+QBO_MONTH_COUNT = len(_qbo_pl_months) or 6
+_MONTH_ENDS = {"Jan": "Jan 31", "Feb": "Feb 28", "Mar": "Mar 31", "Apr": "Apr 30",
+               "May": "May 31", "Jun": "Jun 30", "Jul": "Jul 31", "Aug": "Aug 31",
+               "Sep": "Sep 30", "Oct": "Oct 31", "Nov": "Nov 30", "Dec": "Dec 31"}
+_last_qbo_month = _qbo_pl_months[-1].split(" '")[0] if _qbo_pl_months else "Jun"
+QBO_PERIOD_LABEL = f"Jan 1 – {_MONTH_ENDS.get(_last_qbo_month, 'Jun 30')}, 2026"
+
 ytd_items = [
-    ("Period", "Jan 1 – Jun 30, 2026", None),
-    ("Rental Income", QBO_PL_2026["rent"], MONEY),
-    ("Total Operating Expenses", QBO_PL_2026["expenses"]["total"], MONEY),
-    ("Net Operating Income", QBO_PL_2026["noi"], MONEY),
+    ("Period", QBO_PERIOD_LABEL, None),
+    ("Rental Income", QBO_YTD_RENT, MONEY),
+    ("Total Operating Expenses", QBO_YTD_EXPENSES, MONEY),
+    ("Net Operating Income", QBO_YTD_NOI, MONEY),
 ]
 pf_items = [
     ("Projection Basis", f"{PF['closedMonths']} months actuals + seasonal model", None),
@@ -216,7 +234,7 @@ highlights = [
     f"Occupancy ranging from {occ_min:.0f}% to {occ_max:.0f}% across closed months ({first_month_label} - {last_month_label}) - strong operating performance",
     f"Best month to date: {max_month_label} at ${max_month_gross:,} gross",
     f"Owner margin of {D['summary']['ownerMargin']}% - efficient operations with low OTA commission rates",
-    f"QBO YTD NOI of ${QBO_PL_2026['noi']:,.0f} through June 30 (6 months of operations, annualizes to ~${QBO_PL_2026['noi']*2:,.0f})",
+    f"QBO YTD NOI of ${QBO_YTD_NOI:,.0f} through {_MONTH_ENDS.get(_last_qbo_month)} ({QBO_MONTH_COUNT} months, annualizes to ~${QBO_YTD_NOI / QBO_MONTH_COUNT * 12:,.0f})",
 ]
 for h in highlights:
     ws1.cell(r, 1, f"•  {h}").font = BODY
@@ -555,10 +573,10 @@ r += 2
 ws3.cell(r, 1, "QBO RECONCILIATION").font = SECTION_FONT
 for c in range(1, num_cols + 1): ws3.cell(r, c).border = THICK_B
 r += 1
-ws3.cell(r, 1, f"QBO YTD Rental Income (Jan 1 – Jun 30): ${QBO_PL_2026['rent']:,.0f}").font = NOTE_FONT
+ws3.cell(r, 1, f"QBO YTD Rental Income ({QBO_PERIOD_LABEL}): ${QBO_YTD_RENT:,.0f}").font = NOTE_FONT
 ws3.merge_cells(f"A{r}:{get_column_letter(num_cols)}{r}")
 r += 1
-ws3.cell(r, 1, f"QBO YTD Total Expenses: ${QBO_PL_2026['expenses']['total']:,.0f}  |  QBO YTD NOI: ${QBO_PL_2026['noi']:,.0f}").font = NOTE_FONT
+ws3.cell(r, 1, f"QBO YTD Total Expenses: ${QBO_YTD_EXPENSES:,.0f}  |  QBO YTD NOI: ${QBO_YTD_NOI:,.0f}").font = NOTE_FONT
 ws3.merge_cells(f"A{r}:{get_column_letter(num_cols)}{r}")
 r += 1
 ws3.cell(r, 1, "Note: Minor variances between PMS and QBO are expected due to cash vs accrual timing and partial-month cutoffs.").font = NOTE_FONT

@@ -280,12 +280,15 @@ def load_qbo_monthly_pl():
         "landscaping expense": "other",  # doesn't match ZenStay-style landscaping
         "commissions expense": "other",
         "guest relations": "other",
+        "legal & accounting services": "other",
+        "tax prep fees": "other",
         "general repairs": "maint",
         "disposal & waste fees": "maint",
         "fire safety": "maint",
         "pest control": "maint",
         "security expense": "maint",
         "city & county tax": "taxes",
+        "transient occupancy tax": "taxes",
         "property taxes": "taxes",
         "state tax": "taxes",
         "electricity": "utilities",
@@ -297,6 +300,7 @@ def load_qbo_monthly_pl():
     section_headers = {
         "total for advertising & marketing", "total for repairs & maintenance",
         "total for supplies", "total for taxes paid", "total for utilities",
+        "total for legal & accounting services",
         "total for expenses", "total for income", "gross profit",
         "net operating income", "net income", "net other income",
         "total for bank charges", "total for interest paid",
@@ -306,125 +310,179 @@ def load_qbo_monthly_pl():
     below_line_labels = {
         "bank fees & service charges", "mortgage interest",
     }
-    result = {}
-    for m_label, col in month_cols.items():
-        result[m_label] = {"rent": 0, "total": 0, "buckets": {
-            "cleaning": 0, "supplies": 0, "maint": 0, "marketing": 0,
-            "mgmt": 0, "taxes": 0, "utilities": 0, "other": 0,
-        }}
-
-    # Also capture line-item detail preserving QBO structure for dashboard display
-    pl_rows = []  # each: {"label", "type", "indent", "monthly": {m: val}}
-    current_section = None  # e.g., "Income", "Expenses", "Other Expenses"
     subgroup_labels = {
         "advertising & marketing": 0,
         "repairs & maintenance": 0,
         "supplies": 0,
         "taxes paid": 0,
         "utilities": 0,
+        "legal & accounting services": 0,
         "bank charges": 0,
         "interest paid": 0,
     }
 
-    for row in range(data_start_row, ws.max_row + 1):
-        label = ws.cell(row, 1).value
-        if not label or not isinstance(label, str):
-            continue
-        label_stripped = label.strip()
-        label_lower = label_stripped.lower()
+    result = {}
+    MONTH_INDEX = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+                   "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
 
-        # Section headers (Income, Expenses, Other Expenses)
-        if label_lower in ("income", "expenses", "other expenses"):
-            current_section = label_lower
-            pl_rows.append({"label": label_stripped.upper(), "type": "section", "indent": 0, "monthly": {}})
-            continue
+    def ensure_month(m_label):
+        if m_label not in result:
+            result[m_label] = {"rent": 0, "total": 0, "buckets": {
+                "cleaning": 0, "supplies": 0, "maint": 0, "marketing": 0,
+                "mgmt": 0, "taxes": 0, "utilities": 0, "other": 0,
+            }}
 
-        # Skip the timestamp footer
-        if "cash basis" in label_lower and ":" in label_stripped:
-            continue
+    def parse_sheet(sheet, sheet_month_cols, start_row):
+        """Parse one QBO P&L sheet. Mutates `result` buckets; returns ordered row list."""
+        for m_label in sheet_month_cols:
+            ensure_month(m_label)
+        rows_out = []
+        current_section = None
+        for row in range(start_row, sheet.max_row + 1):
+            label = sheet.cell(row, 1).value
+            if not label or not isinstance(label, str):
+                continue
+            label_stripped = label.strip()
+            label_lower = label_stripped.lower()
 
-        # Detect subtotals and store them with monthly values
-        is_subtotal = label_lower in section_headers
-        is_subgroup = label_lower in subgroup_labels
-        is_below_line = label_lower in below_line_labels
+            # Section headers (Income, Expenses, Other Expenses)
+            if label_lower in ("income", "expenses", "other expenses"):
+                current_section = label_lower
+                rows_out.append({"label": label_stripped.upper(), "type": "section", "indent": 0, "monthly": {}})
+                continue
 
-        # Collect monthly values
-        monthly_vals = {}
-        for m_label, col in month_cols.items():
-            val = ws.cell(row, col).value
-            if isinstance(val, (int, float)):
-                monthly_vals[m_label] = val
-            else:
-                monthly_vals[m_label] = 0
+            # Skip the timestamp footer
+            if "cash basis" in label_lower and ":" in label_stripped:
+                continue
 
-        # Determine display type and indentation
-        if is_subtotal:
-            row_type = "subtotal"
-            indent = 0
-            if "total for" in label_lower:
-                indent = 1  # subgroup subtotals are indented
-            if label_lower in ("total for expenses", "total for income", "total for other expenses"):
+            is_subtotal = label_lower in section_headers
+            is_subgroup = label_lower in subgroup_labels
+            is_below_line = label_lower in below_line_labels
+
+            monthly_vals = {}
+            for m_label, col in sheet_month_cols.items():
+                val = sheet.cell(row, col).value
+                monthly_vals[m_label] = val if isinstance(val, (int, float)) else 0
+
+            if is_subtotal:
+                row_type = "subtotal"
                 indent = 0
-        elif is_subgroup:
-            row_type = "subgroup_header"
-            indent = 1
-        elif label_lower == "rent":
-            row_type = "line_item"
-            indent = 1
-        else:
-            # Detail line item under a subgroup
-            row_type = "line_item"
-            indent = 2
+                if "total for" in label_lower:
+                    indent = 1
+                if label_lower in ("total for expenses", "total for income", "total for other expenses"):
+                    indent = 0
+            elif is_subgroup:
+                row_type = "subgroup_header"
+                indent = 1
+            elif label_lower == "rent":
+                row_type = "line_item"
+                indent = 1
+            else:
+                row_type = "line_item"
+                indent = 2
 
-        pl_rows.append({
-            "label": label_stripped,
-            "type": row_type,
-            "indent": indent,
-            "section": current_section or "",
-            "monthly": monthly_vals,
-        })
+            rows_out.append({
+                "label": label_stripped,
+                "type": row_type,
+                "indent": indent,
+                "section": current_section or "",
+                "monthly": monthly_vals,
+            })
 
-        # ── Continue with existing bucket-summarization logic ──
+            # ── Bucket summarization ──
+            if label_lower == "rent":
+                for m_label, v in monthly_vals.items():
+                    result[m_label]["rent"] += v
+                continue
+            # DO include subgroup headers because QBO can post transactions directly
+            # to the parent GL account (value lives on the header row).
+            if is_subtotal or is_below_line:
+                continue
+            bucket = None
+            for kw, b in qbo_label_to_bucket.items():
+                if kw in label_lower:
+                    bucket = b
+                    break
+            if not bucket:
+                continue
+            for m_label, v in monthly_vals.items():
+                result[m_label]["buckets"][bucket] += v
+                result[m_label]["total"] += v
+        return rows_out
 
-        # Rent (income)
-        if label_lower == "rent":
-            for m_label, col in month_cols.items():
-                val = ws.cell(row, col).value
-                if isinstance(val, (int, float)):
-                    result[m_label]["rent"] += val
+    def merge_rows(base_rows, new_rows):
+        """Merge a single-month parse into the base row list, preserving order.
+        Rows matched by (label, type) get their monthly values merged; unmatched
+        rows are inserted after the last matched position."""
+        insert_at = 0
+        for nr in new_rows:
+            key = (nr["label"].lower(), nr["type"])
+            found = None
+            for i, br in enumerate(base_rows):
+                if (br["label"].lower(), br["type"]) == key:
+                    found = i
+                    break
+            if found is not None:
+                base_rows[found]["monthly"].update(nr["monthly"])
+                insert_at = found + 1
+            else:
+                base_rows.insert(insert_at, nr)
+                insert_at += 1
+
+    # 1. Parse the base YTD monthly file
+    pl_rows = parse_sheet(ws, month_cols, data_start_row)
+    all_months = dict(month_cols)  # {m_label: col} - keys are what matter
+
+    # 2. Merge any single-month P&L files (data/QBO-PL-*.xlsx).
+    #    These are QBO single-period exports: period in row 3 ("July 2026"),
+    #    values in column B under a "210 W Yanonali" header.
+    for single_path in sorted(DATA_DIR.glob("QBO-PL-*.xlsx")):
+        swb = load_workbook(single_path, data_only=True)
+        sws = swb.active
+        period = None
+        for scan_row in range(1, 6):
+            v = sws.cell(scan_row, 1).value
+            if v and isinstance(v, str):
+                parts = v.strip().split()
+                if len(parts) == 2 and parts[1].isdigit() and parts[0][:3].capitalize() in MONTH_INDEX:
+                    period = f"{parts[0][:3].capitalize()} '{parts[1][-2:]}"
+                    break
+        if not period:
+            print(f"  Warning: could not read period from {single_path.name}; skipping")
             continue
-
-        # Skip section headers, subtotals, below-line items for bucket aggregation.
-        # DO include subgroup headers (e.g., "Advertising & marketing", "Supplies") because
-        # QBO can post transactions directly to the parent GL account, in which case the
-        # subgroup header row has its own value that needs to be included in the sum.
-        if is_subtotal or is_below_line:
+        if period in all_months:
+            print(f"  Skipping {single_path.name}: {period} already in monthly file")
             continue
-
-        # Map to a bucket
-        bucket = None
-        for kw, b in qbo_label_to_bucket.items():
-            if kw in label_lower:
-                bucket = b
-                break
-        if not bucket:
+        # Find data start: row after the "210 W Yanonali" header row
+        s_start = None
+        for scan_row in range(1, 10):
+            if any(sws.cell(scan_row, c).value for c in range(2, 4)):
+                hdr = str(sws.cell(scan_row, 2).value or "")
+                if "yanonali" in hdr.lower():
+                    s_start = scan_row + 1
+                    break
+        if not s_start:
+            print(f"  Warning: could not find data header in {single_path.name}; skipping")
             continue
-
-        # Add each month's value to the appropriate bucket
-        for m_label, col in month_cols.items():
-            val = ws.cell(row, col).value
-            if isinstance(val, (int, float)):
-                result[m_label]["buckets"][bucket] += val
-                result[m_label]["total"] += val
+        print(f"  Loading {single_path.name} ({period})...")
+        sub_rows = parse_sheet(sws, {period: 2}, s_start)
+        merge_rows(pl_rows, sub_rows)
+        all_months[period] = None
 
     # Report what we loaded
     months_with_data = [m for m, d in result.items() if d["total"] > 0 or d["rent"] > 0]
     if months_with_data:
         print(f"  QBO closed months: {', '.join(months_with_data)}")
 
+    # Chronologically ordered month list for display
+    def month_sort(m_label):
+        mon, yr = m_label.split(" '")
+        return (int(yr), MONTH_INDEX.get(mon, 0))
+    ordered_months = sorted(all_months.keys(), key=month_sort)
+
     # Return both the bucketed result and the line-item detail
     result["_pl_detail"] = {
-        "months": list(month_cols.keys()),
+        "months": ordered_months,
         "rows": pl_rows,
     }
     return result
