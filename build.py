@@ -711,7 +711,9 @@ def compute(bookings, expenses, qbo_monthly=None):
         row = {"month": mk, "source": d.get("source", "none")}
         for k, v in d.items():
             if k != "source":
-                row[k] = round(v)
+                # Keep cents so bucket sums tie exactly to QBO totals
+                # (display layers apply their own rounding)
+                row[k] = round(v, 2)
         expense_monthly.append(row)
 
     # Top vendors

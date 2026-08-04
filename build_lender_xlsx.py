@@ -517,6 +517,7 @@ expense_cats = [
     ("Management Fee", "mgmt"),
     ("Marketing & Advertising", "marketing"),
     ("Taxes & Licenses", "taxes"),
+    ("Utilities", "utilities"),
     ("Other", "other"),
 ]
 expense_row_range_start = None
