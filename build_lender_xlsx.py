@@ -1010,11 +1010,14 @@ ws7.merge_cells(f"A{r}:C{r}")
 r += 1
 
 ws7.cell(r, 1, "Cleaning fees collected from guests").font = BODY
-ws7.cell(r, 2, "see Cleaning expense").font = NOTE_FONT
+ws7.cell(r, 2, "excluded from revenue").font = NOTE_FONT
 ws7.cell(r, 1).border = THIN_B
 ws7.cell(r, 2).border = THIN_B
 r += 1
-ws7.cell(r, 1, "  Offset by Cleaning expense above; net-neutral pass-through").font = NOTE_FONT
+ws7.cell(r, 1, "  Collected and retained by property manager for housekeeping; not included in").font = NOTE_FONT
+ws7.merge_cells(f"A{r}:C{r}")
+r += 1
+ws7.cell(r, 1, "  gross revenue, ADR, or owner P&L. Cleaning expense above reflects full cost billed.").font = NOTE_FONT
 ws7.merge_cells(f"A{r}:C{r}")
 r += 2
 
