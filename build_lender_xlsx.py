@@ -582,6 +582,12 @@ ws3.merge_cells(f"A{r}:{get_column_letter(num_cols)}{r}")
 r += 1
 ws3.cell(r, 1, "Note: Minor variances between PMS and QBO are expected due to cash vs accrual timing and partial-month cutoffs.").font = NOTE_FONT
 ws3.merge_cells(f"A{r}:{get_column_letter(num_cols)}{r}")
+r += 1
+ws3.cell(r, 1, "Rental income is as remitted by booking channels and includes guest-paid cleaning fees (not separable per").font = NOTE_FONT
+ws3.merge_cells(f"A{r}:{get_column_letter(num_cols)}{r}")
+r += 1
+ws3.cell(r, 1, "property manager); the corresponding cleaning costs appear in operating expenses and approximately offset.").font = NOTE_FONT
+ws3.merge_cells(f"A{r}:{get_column_letter(num_cols)}{r}")
 
 ws3.freeze_panes = "B6"
 
@@ -1009,15 +1015,21 @@ ws7.cell(r, 1, "  Remitted to City of Santa Barbara (12% lodging tax)").font = N
 ws7.merge_cells(f"A{r}:C{r}")
 r += 1
 
-ws7.cell(r, 1, "Cleaning fees collected from guests").font = BODY
-ws7.cell(r, 2, "excluded from revenue").font = NOTE_FONT
+ws7.cell(r, 1, "Cleaning fees paid by guests").font = BODY
+ws7.cell(r, 2, "included in gross revenue").font = NOTE_FONT
 ws7.cell(r, 1).border = THIN_B
 ws7.cell(r, 2).border = THIN_B
 r += 1
-ws7.cell(r, 1, "  Collected and retained by property manager for housekeeping; not included in").font = NOTE_FONT
+ws7.cell(r, 1, "  Booking channels remit lump-sum payments, so guest-paid cleaning fees are included in").font = NOTE_FONT
 ws7.merge_cells(f"A{r}:C{r}")
 r += 1
-ws7.cell(r, 1, "  gross revenue, ADR, or owner P&L. Cleaning expense above reflects full cost billed.").font = NOTE_FONT
+ws7.cell(r, 1, "  gross revenue and ADR (per property manager; not separable). The offsetting cleaning").font = NOTE_FONT
+ws7.merge_cells(f"A{r}:C{r}")
+r += 1
+ws7.cell(r, 1, "  cost is in Operating Expenses; the two sides offset within ~3% YTD (approx. net-neutral).").font = NOTE_FONT
+ws7.merge_cells(f"A{r}:C{r}")
+r += 1
+ws7.cell(r, 1, "  TOT is calculated on gross revenue including cleaning fees.").font = NOTE_FONT
 ws7.merge_cells(f"A{r}:C{r}")
 r += 2
 
