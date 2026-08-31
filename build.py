@@ -136,6 +136,22 @@ def find_csv(keyword):
             return f
     return None
 
+def find_csvs(*keywords):
+    """Find ALL CSVs in data/ matching any keyword, deduped and name-sorted.
+
+    Expense exports arrive as sequential date-range files (e.g. Jan-Aug, then
+    Aug-Aug). find_csv() returns only the first match, which silently dropped
+    every file after the first. Callers that can span multiple files must use
+    this instead.
+    """
+    hits = {}
+    for f in DATA_DIR.iterdir():
+        if f.suffix.lower() != ".csv":
+            continue
+        if any(k.lower() in f.name.lower() for k in keywords):
+            hits[f.resolve()] = f
+    return [hits[k] for k in sorted(hits)]
+
 # ════════════════════════════════════════════════════════════════
 # PARSE BOOKINGS
 # ════════════════════════════════════════════════════════════════
@@ -180,36 +196,50 @@ def load_bookings():
 # PARSE EXPENSES
 # ════════════════════════════════════════════════════════════════
 def load_expenses():
-    csv_path = find_csv("expense") or find_csv("paid") or find_csv("reimburs") or find_csv("DE-")
-    if not csv_path:
+    csv_paths = find_csvs("expense", "paid", "reimburs", "DE-")
+    if not csv_paths:
         print("  Warning: No expense CSV found")
         return []
-    print(f"  Loading {csv_path.name}...")
     expenses = []
-    with open(csv_path, "r", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            # Support both "Amount" (old format) and "Expense" (new DE- format) columns
-            amount_raw = row.get("Amount", "") or row.get("Expense", "") or ""
-            amount_str = str(amount_raw).strip()
-            # Skip rows with no amount, summary/total rows, or unit section headers
-            if not amount_str or amount_str == "":
-                continue
-            cat_raw = (row.get("Category", "") or "").strip()
-            date_raw = (row.get("Date", "") or "").strip()
-            # Skip rows that are just totals (no date, no category)
-            if not date_raw and not cat_raw:
-                continue
-            amount = parse_dollar(amount_raw)
-            # Check for negative (refund) — handles both ($81.90) and -81.9 formats
-            if "(" in amount_str or (amount_str.startswith("-") and amount > 0):
-                amount = -abs(amount)
-            expenses.append({
-                "date": parse_expense_date(date_raw),
-                "category": cat_raw,
-                "vendor": (row.get("Vendor", "") or "").strip(),
-                "amount": amount,
-            })
+    seen = set()
+    dupes = 0
+    for csv_path in csv_paths:
+        print(f"  Loading {csv_path.name}...")
+        before = len(expenses)
+        with open(csv_path, "r", encoding="utf-8-sig") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Support both "Amount" (old format) and "Expense" (new DE- format) columns
+                amount_raw = row.get("Amount", "") or row.get("Expense", "") or ""
+                amount_str = str(amount_raw).strip()
+                # Skip rows with no amount, summary/total rows, or unit section headers
+                if not amount_str or amount_str == "":
+                    continue
+                cat_raw = (row.get("Category", "") or "").strip()
+                date_raw = (row.get("Date", "") or "").strip()
+                # Skip rows that are just totals (no date, no category)
+                if not date_raw and not cat_raw:
+                    continue
+                amount = parse_dollar(amount_raw)
+                # Check for negative (refund) — handles both ($81.90) and -81.9 formats
+                if "(" in amount_str or (amount_str.startswith("-") and amount > 0):
+                    amount = -abs(amount)
+                # Guard against overlapping date ranges across sequential exports
+                dedupe_key = (date_raw, cat_raw, (row.get("Vendor", "") or "").strip(),
+                              (row.get("Description", "") or "").strip(), amount_str)
+                if dedupe_key in seen:
+                    dupes += 1
+                    continue
+                seen.add(dedupe_key)
+                expenses.append({
+                    "date": parse_expense_date(date_raw),
+                    "category": cat_raw,
+                    "vendor": (row.get("Vendor", "") or "").strip(),
+                    "amount": amount,
+                })
+        print(f"    +{len(expenses) - before} rows")
+    if dupes:
+        print(f"  Skipped {dupes} duplicate rows across overlapping expense files")
     print(f"  Total expenses loaded: {len(expenses)}")
     return expenses
 
