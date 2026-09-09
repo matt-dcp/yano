@@ -879,14 +879,28 @@ def compute(bookings, expenses, qbo_monthly=None):
             # expenses have posted to the bookkeeping CSV.
             rev = actual_rev[name]
             exp = actual_exp_lookup.get(name)
+            # Projected OpEx: cleaning scaled to actual bookings + trailing non-cleaning avg
+            proj_clean = round(clean_cost * rev["bookings"])
+            proj_opex = proj_clean + round(trailing_non_clean)
+            act_opex = act_clean = None
             if exp:
-                month_opex = exp["total"] - exp.get("mgmt", 0)
-                month_clean = exp["cleaning"]
+                act_opex = exp["total"] - exp.get("mgmt", 0)
+                act_clean = exp["cleaning"]
+
+            if status == "closed" and act_opex is not None:
+                month_opex, month_clean, opex_basis = act_opex, act_clean, "actual"
+            elif status == "current":
+                # Revenue for the current month is already full-month (all bookings
+                # count, including those not yet stayed), but expenses have only
+                # posted month-to-date. Using partial actuals against full revenue
+                # inflates NOI, so hold the projection unless actuals already exceed
+                # it (e.g. a large repair has landed).
+                if act_opex is not None and act_opex > proj_opex:
+                    month_opex, month_clean, opex_basis = act_opex, act_clean, "actual"
+                else:
+                    month_opex, month_clean, opex_basis = proj_opex, proj_clean, "projected"
             else:
-                # Project OpEx: cleaning scaled to actual bookings + trailing non-cleaning avg
-                proj_clean = round(clean_cost * rev["bookings"])
-                month_opex = proj_clean + round(trailing_non_clean)
-                month_clean = proj_clean
+                month_opex, month_clean, opex_basis = proj_opex, proj_clean, "projected"
             pf_total_cleaning += month_clean
             pf_total_other_opex += month_opex - month_clean
             pf_monthly.append({
@@ -895,6 +909,7 @@ def compute(bookings, expenses, qbo_monthly=None):
                 "opex": round(month_opex), "noi": round(rev["toOwner"] - month_opex),
                 "bookings": rev["bookings"],
                 "source": "actual" if status == "closed" else "booked",
+                "opexBasis": opex_basis,
             })
         else:
             # Project from de-seasonalized baseline × seasonal index
