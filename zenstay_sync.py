@@ -52,6 +52,28 @@ BOOKING_FILES = {
 MIN_BYTES = {"current-bookings": 100, "past-bookings": 20_000, "upcoming-bookings": 2_000}
 
 
+CONSUMED = DOWNLOADS / "_zenstay_consumed"
+
+
+def _retire_downloads(staged, keep_days: int = 14) -> None:
+    """Move consumed exports out of ~/Downloads and prune the archive.
+
+    Each daily run drops four more CSVs with Chrome's " (N)" suffix. Left alone
+    that is ~1,400 files a year for the newest-by-mtime glob to walk.
+    """
+    import time
+    CONSUMED.mkdir(exist_ok=True)
+    for src, _ in staged:
+        try:
+            src.replace(CONSUMED / f"{int(src.stat().st_mtime)}-{src.name}")
+        except OSError as e:
+            print(f"  note: could not retire {src.name}: {e}")
+    cutoff = time.time() - keep_days * 86400
+    for old in CONSUMED.glob("*.csv"):
+        if old.stat().st_mtime < cutoff:
+            old.unlink(missing_ok=True)
+
+
 def newest(prefix: str, suffix: str = ".csv") -> Path | None:
     hits = [p for p in DOWNLOADS.glob(f"{prefix}*{suffix}") if p.is_file()]
     return max(hits, key=lambda p: p.stat().st_mtime) if hits else None
@@ -143,14 +165,32 @@ def main() -> int:
         print(f"  {k:>16} {before[k]:>13,} {after[k]:>14,}")
 
     # ---- sanity gates -----------------------------------------------------
+    # This ships to a dashboard lenders may be reading, unattended. A truncated
+    # or partial export must not get through, so gate on the quantities that
+    # only ever move one way or move slowly.
+    fails = []
     if after["bookings"] < before["bookings"] - 5:
-        print("ABORT: booking count dropped by more than 5; not shipping.", file=sys.stderr)
-        return 1
+        fails.append(f"booking count fell {before['bookings']} -> {after['bookings']}")
+    # gross-to-date is cumulative; it should never fall (small tolerance for
+    # a cancellation or two)
+    if after["gross"] < before["gross"] * 0.995:
+        fails.append(f"gross to date fell ${before['gross']:,.0f} -> ${after['gross']:,.0f}")
+    if before["pfGross"] and abs(after["pfGross"] / before["pfGross"] - 1) > 0.15:
+        fails.append(f"full-year gross moved >15% in one day "
+                     f"(${before['pfGross']:,.0f} -> ${after['pfGross']:,.0f})")
     if after["noiCash"] <= 0:
-        print("ABORT: non-positive NOI.", file=sys.stderr)
+        fails.append("non-positive NOI")
+    if after["closedMonths"] < before["closedMonths"]:
+        fails.append(f"closed months regressed {before['closedMonths']} -> {after['closedMonths']}")
+    if fails:
+        for f in fails:
+            print(f"ABORT: {f}", file=sys.stderr)
+        print("Not shipping. data/ has been updated; investigate before rerunning.",
+              file=sys.stderr)
         return 1
     if after == before:
         print("No change in metrics; nothing to commit.")
+        _retire_downloads(staged)
         return 0
 
     # ---- ship -------------------------------------------------------------
@@ -167,9 +207,11 @@ def main() -> int:
     subprocess.run(["git", "commit", "-m", msg], cwd=SITE, check=True)
     if args.no_push:
         print("Committed. --no-push set, not pushing.")
+        _retire_downloads(staged)
         return 0
     subprocess.run(["git", "push", "origin", "main"], cwd=SITE, check=True)
     print("Pushed. Vercel will deploy.")
+    _retire_downloads(staged)
     return 0
 
 
