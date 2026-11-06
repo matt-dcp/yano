@@ -335,6 +335,8 @@ def load_qbo_monthly_pl():
         "net operating income", "net income", "net other income",
         "total for bank charges", "total for interest paid",
         "total for other expenses",
+        # QBO export from Oct 2026 drops "for" on the three main totals
+        "total income", "total expenses", "total other expenses",
     }
     # Below-the-line items (skip - not operating expenses)
     below_line_labels = {
@@ -399,7 +401,8 @@ def load_qbo_monthly_pl():
                 indent = 0
                 if "total for" in label_lower:
                     indent = 1
-                if label_lower in ("total for expenses", "total for income", "total for other expenses"):
+                if label_lower in ("total for expenses", "total for income", "total for other expenses",
+                                   "total expenses", "total income", "total other expenses"):
                     indent = 0
             elif is_subgroup:
                 row_type = "subgroup_header"

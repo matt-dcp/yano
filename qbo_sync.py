@@ -26,7 +26,7 @@ SITE = Path(__file__).resolve().parent
 DATA = SITE / "data"
 ARCHIVE = DATA / "_superseded"
 REPORTS = (Path.home() / "Library/CloudStorage/GoogleDrive-matt@drivencap.com"
-           / "Shared drives/DCP Bookkeeping/Source Documents/DCP Wealth Fund"
+           / "Shared drives/DCP Entity Bookkeeping/Source Documents/DCP Wealth Fund"
            / "Draft Financial Reports")
 TARGET = DATA / "QBO-Monthly-PL.xlsx"
 # Yanonali is one class inside the DCP Wealth Fund books; this is the property-only P&L.
@@ -72,9 +72,11 @@ def line_totals(xlsx: Path, label: str) -> dict:
     out = {}
     for row in rows[hdr_i + 1:]:
         name = str(row[0]).strip() if row and row[0] is not None else ""
-        if name in ("Rent", "Total for Expenses", "Net Operating Income"):
+        # QBO from Oct 2026 writes "Total Expenses"; older files say "Total for Expenses".
+        key = "Total for Expenses" if name == "Total Expenses" else name
+        if key in ("Rent", "Total for Expenses", "Net Operating Income"):
             try:
-                out[name] = round(float(row[col]), 2)
+                out[key] = round(float(row[col]), 2)
             except (TypeError, ValueError):
                 pass
     return out
@@ -153,11 +155,13 @@ def main() -> int:
         return 2
     got = {}
     for row in q.get("rows", []):
-        if row.get("label") in expected:
+        lab = row.get("label")
+        lab = "Total for Expenses" if lab == "Total Expenses" else lab
+        if lab in expected:
             m = row.get("monthly") or {}
             v = m.get(jlabel) if isinstance(m, dict) else None
             if v is not None:
-                got[row["label"]] = round(float(v), 2)
+                got[lab] = round(float(v), 2)
     bad = [k for k, v in expected.items() if abs(got.get(k, 0) - v) > 0.01]
     if bad:
         for k in bad:
